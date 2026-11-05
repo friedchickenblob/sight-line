@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.ipynb_checkpoints/
+
+# Large media / model files (GitHub rejects files >100 MB)
+clips/*.mp4
+*.pt
+*.onnx
+runs/
