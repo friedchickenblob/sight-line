@@ -222,7 +222,9 @@ and directions, with and without the worker nearby. Record a different floor or 
    ```bash
    yolo predict model=yolo26n.pt source=clips/D.mp4 save=True      # annotated video in runs/detect/
    ```
-9. **Tracking**, once the `track.py` fixes in Part 7 are done:
+9. **Tracking.** First copy `clips/floor.example.json` to `clips/floor.json` and fill in the **measured** floor-marker
+   centres, camera height and point under the camera from the clip log. `track.py` uses them to turn pixels into metres,
+   fitting the map from the markers it sees in the clip, until Hanh's `geometry.py` replaces this.
    ```bash
    python scripts/track.py clips/A.mp4 results/tracks_A.csv
    python scripts/track.py clips/D.mp4 results/tracks_D.csv

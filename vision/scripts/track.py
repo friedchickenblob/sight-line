@@ -3,20 +3,22 @@
 Usage: python scripts/track.py clips/D.mp4 results/tracks_D.csv
        python scripts/track.py 0                     # live webcam, no CSV
 
-`to_floor` is a placeholder until Hanh's geometry.py lands; replace the import below.
+Floor map, best first: Hanh's geometry.py (when it lands) -> fitted from floor markers 0-3 in the
+clip, using the measured positions in clips/floor.json (floor_map.py) -> pixels / 500 placeholder.
 """
 import csv, sys, time
 from collections import deque
 import cv2
 import numpy as np
 from ultralytics import YOLO
+import floor_map
 
 try:
     from geometry import to_floor, H  # Hanh's shared module
 except ImportError:
     H = None
-    def to_floor(H, points):  # placeholder: pixels / 500 ≈ metres, just so the pipeline runs
-        return [(x / 500, y / 500) for x, y in points]
+    to_floor = floor_map.to_floor
+FIT_WITHIN_FRAMES = 90  # look this long for all four floor markers before falling back to the placeholder
 
 try:
     from pylsl import local_clock
@@ -103,7 +105,21 @@ def run(source, out_csv=None):
     writer = csv.writer(open(out_csv, "w", newline="")) if out_csv else None
     if writer:
         writer.writerow(["t", "id", "cls", "x_m", "y_m", "vx", "vy"])
-    for t, frame in frames(source):
+    H_ = H
+    cfg = floor_map.load_config()
+    if H_ is None and cfg is None:
+        print(f"no {floor_map.CONFIG}: using the pixels/500 placeholder (copy clips/floor.example.json)")
+        H_ = floor_map.PLACEHOLDER_H
+    for i, (t, frame) in enumerate(frames(source)):
+        if H_ is None:  # fit the floor map from the markers in the clip
+            H_, err = floor_map.fit_from_frame(frame, cfg["markers_m"])
+            if H_ is not None:
+                print(f"floor map fitted from markers 0-3 at frame {i} (fit error {err * 100:.1f} cm)")
+            elif i + 1 >= FIT_WITHIN_FRAMES:
+                print(f"floor markers 0-3 not all seen in {FIT_WITHIN_FRAMES} frames: using the placeholder")
+                H_ = floor_map.PLACEHOLDER_H
+            else:
+                continue
         # conf is low on purpose: ByteTrack uses weak boxes in its second matching pass
         r = model.track(frame, persist=True, tracker="bytetrack.yaml", conf=0.1, imgsz=640, verbose=False)[0]
         if r.boxes.id is None:
@@ -113,7 +129,7 @@ def run(source, out_csv=None):
                                             r.boxes.cls.int().tolist()):
             cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
             # TODO worker: apply Hanh's parallax correction (h ≈ 1.3 m) or use hardhat marker
-            (xm, ym), = to_floor(H, [(cx, cy)])
+            (xm, ym), = to_floor(H_, [(cx, cy)])
             (machines if k in MACHINE_CLS else workers if k in WORKER_CLS else []).append((tid, xm, ym))
 
         rows = []
