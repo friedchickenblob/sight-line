@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>SightLine camera</title>
+  <style>
+    :root { --bg: #f5f6f8; --card: #fff; --text: #1c2027; --muted: #667085; --line: #e3e6eb;
+            --accent: #2a6fdb; --ok: #1f9d55; --bad: #d1495b; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #111418; --card: #1a1e24; --text: #e6e8eb; --muted: #98a2b3; --line: #2b313a;
+              --accent: #5b93f0; --ok: #3fbf74; --bad: #ef6b7d; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+           font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 640px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
+    h1 { font-size: 18px; margin: 0; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+    video { width: 100%; border-radius: 8px; background: #000; aspect-ratio: 16 / 9; object-fit: contain; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    select, button { font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
+                     background: var(--bg); color: var(--text); }
+    select { flex: 1 1 140px; min-width: 0; }
+    button { flex: 1 1 120px; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button:disabled { opacity: .45; }
+    .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 600;
+            background: var(--line); }
+    .pill.connected { background: var(--ok); color: #fff; }
+    .pill.failed, .pill.disconnected { background: var(--bad); color: #fff; }
+    dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; }
+    dt { color: var(--muted); }
+    dd { margin: 0; font-variant-numeric: tabular-nums; }
+    pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; max-height: 220px;
+          overflow-y: auto; color: var(--muted); }
+    .error { color: var(--bad); }
+  </style>
+</head>
+<body>
+<main>
+  <div class="row" style="justify-content: space-between">
+    <h1>SightLine · phone camera</h1>
+    <span id="state" class="pill">idle</span>
+  </div>
+
+  <div id="insecure" class="card error" hidden>
+    This page isn't on HTTPS, so Chrome won't give it the camera. Open the
+    <b>https://</b> address the server printed.
+  </div>
+
+  <div class="card">
+    <video id="preview" autoplay muted playsinline></video>
+    <div class="row" style="margin-top: 10px">
+      <select id="facing">
+        <option value="environment">Back camera</option>
+        <option value="user">Front camera</option>
+      </select>
+      <select id="size">
+        <option value="640x480">640 × 480</option>
+        <option value="1280x720" selected>1280 × 720</option>
+        <option value="1920x1080">1920 × 1080</option>
+      </select>
+      <select id="fps">
+        <option value="15">15 fps</option>
+        <option value="30" selected>30 fps</option>
+      </select>
+    </div>
+    <div class="row" style="margin-top: 8px">
+      <button id="start" class="primary">Start streaming</button>
+      <button id="stop" disabled>Stop</button>
+    </div>
+    <div id="error" class="error" hidden></div>
+  </div>
+
+  <div class="card">
+    <dl>
+      <dt>sending</dt><dd id="sending">–</dd>
+      <dt>model</dt><dd id="model">–</dd>
+      <dt>server latency</dt><dd id="latency">–</dd>
+      <dt>dropped</dt><dd id="dropped">–</dd>
+    </dl>
+    <pre id="result">Model results appear here.</pre>
+  </div>
+</main>
+
+<script src="/static/client.js"></script>
+</body>
+</html>

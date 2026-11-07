@@ -1,0 +1,7 @@
+aiortc>=1.9          # WebRTC: receives the phone's camera
+aiohttp>=3.9         # serves the phone page + the /offer endpoint
+cryptography>=42     # self-signed HTTPS certificate (Chrome needs HTTPS for the camera)
+numpy>=1.24
+pylsl>=1.16          # local_clock(): the team's shared clock for frame timestamps
+pytest>=7
+# optional: pip install ultralytics   (for --model yolo)
