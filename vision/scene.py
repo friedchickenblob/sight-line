@@ -1,7 +1,7 @@
 """Turn one frame's detections into a scene: who the worker is, where everything is on the
 floor, and the direction/distance of each hazard from the worker.
 
-No camera or model here, so it's unit-testable (tests/test_scene.py).
+No camera or model here, so it's unit-testable (vision/tests/test_scene.py).
 """
 
 from __future__ import annotations
