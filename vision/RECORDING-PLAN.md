@@ -207,10 +207,10 @@ and directions, with and without the worker nearby. Record a different floor or 
    ```bash
    python scripts/eval_grid.py names A
    ```
-   If it's mostly "truck", set `CAR = 7` at the top of `scripts/eval_grid.py`. If it's "car", leave `CAR = 2`.
-7. **Detection rate grid:**
+   It lists how many frames each class appears in. The truck is probably "truck" or "car".
+7. **Detection rate grid**, using that name:
    ```bash
-   python scripts/eval_grid.py grid        # writes results/grid.md
+   python scripts/eval_grid.py grid --car truck        # writes results/grid.md
    ```
    Then apply the decision rule from the guide:
    - The truck is found in **95% or more** of frames on A and D: the pretrained model is enough.
