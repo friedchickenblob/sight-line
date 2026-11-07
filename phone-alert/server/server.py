@@ -3,6 +3,7 @@
     python server.py                       # listens on 0.0.0.0:8765
     python server.py --token mysecret      # require a shared secret from phones and senders
     python server.py --mqtt localhost      # also forward MQTT messages on sightline/alert to the phone
+    python server.py --dashboard           # also run the head-motion dashboard; it appears in the Dashboard tab
 
 Send an alert (from anywhere that can reach the laptop):
 
@@ -29,10 +30,14 @@ import json
 import os
 import queue
 import secrets
+import shlex
 import socket
+import subprocess
+import sys
 import threading
 import time
 from collections import deque
+from pathlib import Path
 from typing import Optional
 
 from flask import Flask, Response, abort, jsonify, request
@@ -152,33 +157,186 @@ def lan_addresses() -> list[str]:
     return found
 
 
+class DashboardLink:
+    """The head-motion dashboard (max/dashboard/app.py) as a tab on this server's page.
+
+    It stays its own program on its own port (default 5000) and the Dashboard tab shows it in a frame.
+    With --dashboard this server also starts it, passes its output through, and stops it on exit.
+    """
+
+    DEFAULT_SCRIPT = Path(__file__).resolve().parents[2] / "max" / "dashboard" / "app.py"
+
+    def __init__(self, port: int = 5000, script: Optional[Path] = None, extra_args=(),
+                 python: Optional[str] = None, lan: bool = False):
+        self.port = port
+        self.script = Path(script) if script else self.DEFAULT_SCRIPT
+        self.extra_args = list(extra_args)
+        self.python = python or sys.executable
+        self.lan = lan
+        self.proc: Optional[subprocess.Popen] = None
+        self.log: deque = deque(maxlen=20)
+
+    def command(self) -> list:
+        host = "0.0.0.0" if self.lan else "127.0.0.1"
+        return [self.python, str(self.script), *self.extra_args, "--host", host, "--port", str(self.port)]
+
+    def start(self) -> None:
+        if not self.script.is_file():
+            raise FileNotFoundError(f"dashboard script not found: {self.script}")
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        self.proc = subprocess.Popen(self.command(), cwd=str(self.script.parent.parent), stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT, text=True, errors="replace", creationflags=flags)
+        threading.Thread(target=self._pump, daemon=True).start()
+
+    def _pump(self) -> None:
+        for line in self.proc.stdout:
+            line = line.rstrip()
+            if line:
+                self.log.append(line)
+                print(f"[dashboard] {line}")
+
+    def stop(self) -> None:
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+
+    def reachable(self) -> bool:
+        try:
+            socket.create_connection(("127.0.0.1", self.port), timeout=0.3).close()
+            return True
+        except OSError:
+            return False
+
+    def status(self) -> dict:
+        exit_code = self.proc.poll() if self.proc else None
+        try:
+            shown = self.script.relative_to(self.DEFAULT_SCRIPT.parents[2]).as_posix()
+        except ValueError:
+            shown = str(self.script)
+        return {
+            "port": self.port,
+            "managed": self.proc is not None,
+            "reachable": self.reachable(),
+            "exit_code": exit_code,
+            "lan": self.lan,
+            "script": str(self.script),
+            "script_found": self.script.is_file(),
+            "command": f"python {shown} --board synthetic     (run from the repo root, with the max/ virtual environment)",
+            "log": list(self.log),
+        }
+
+
 PAGE = """<!doctype html>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Phone alert server</title>
+<title>SightLine control</title>
+<script>
+// Set the theme before the page paints: saved choice, otherwise the system setting.
+(function () {
+  var t = null;
+  try { t = localStorage.getItem('sightline-theme'); } catch (e) {}
+  if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', t);
+})();
+</script>
 <style>
- body{font:15px/1.4 system-ui,Segoe UI,sans-serif;max-width:640px;margin:1.5rem auto;padding:0 1rem;color:#1f2937}
- h1{font-size:1.3rem;margin:0 0 .2rem} h2{font-size:1rem;margin:1.4rem 0 .4rem}
- input,select,textarea,button{font:inherit;padding:.5rem;border:1px solid #cbd5e1;border-radius:6px;width:100%;box-sizing:border-box}
- button{background:#14213d;color:#fff;border:0;cursor:pointer;margin-top:.5rem} button:active{opacity:.8}
- label{display:block;margin-top:.6rem;font-weight:600} code{background:#f1f5f9;padding:.1rem .3rem;border-radius:4px}
- .pill{display:inline-block;padding:.1rem .5rem;border-radius:99px;font-size:.8rem;background:#e2e8f0}
- .alert{background:#fecaca}.warn{background:#fde68a}.ok{color:#15803d}.bad{color:#b91c1c}
- ul{padding-left:1.1rem;margin:.3rem 0} #out{min-height:1.4em;margin-top:.4rem}
+ :root{color-scheme:light;--bg:#fff;--text:#1f2937;--muted:#64748b;--field:#fff;--line:#cbd5e1;--code:#f1f5f9;--pill:#e2e8f0;
+  --alert:#fecaca;--warn:#fde68a;--ok:#15803d;--bad:#b91c1c;--btn:#14213d;--btn-text:#fff}
+ :root[data-theme=dark]{color-scheme:dark;--bg:#111418;--text:#e6e8eb;--muted:#98a2b3;--field:#1a1e24;--line:#2b313a;--code:#1a1e24;--pill:#2b313a;
+  --alert:#7f1d1d;--warn:#78350f;--ok:#3fbf74;--bad:#ef6b7d;--btn:#f2b705;--btn-text:#14213d}
+ *{box-sizing:border-box}
+ body{font:15px/1.4 system-ui,Segoe UI,sans-serif;margin:0;color:var(--text);background:var(--bg)}
+ header{position:sticky;top:0;z-index:5;background:#14213d;color:#fff;display:flex;align-items:center;gap:1.2rem;padding:0 1rem;height:48px;border-bottom:3px solid #f2b705}
+ header b{font-size:1rem;white-space:nowrap}
+ nav{display:flex;gap:.2rem;height:100%}
+ nav button{all:unset;cursor:pointer;padding:0 1rem;display:flex;align-items:center;gap:.4rem;color:#cbd5e1;font-weight:600;border-bottom:3px solid transparent;margin-bottom:-3px}
+ nav button:hover{color:#fff}
+ nav button[aria-selected=true]{color:#fff;border-bottom-color:#f2b705}
+ nav button:focus-visible,#theme:focus-visible{outline:2px solid #f2b705;outline-offset:-2px}
+ #theme{all:unset;cursor:pointer;margin-left:auto;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#cbd5e1}
+ #theme:hover{color:#fff;background:rgba(255,255,255,.12)} #theme:focus-visible{outline:2px solid #f2b705}
+ #theme svg{width:20px;height:20px;fill:currentColor}
+ :root[data-theme=light] .i-sun,:root[data-theme=dark] .i-moon{display:none}
+ .led{width:.55rem;height:.55rem;border-radius:50%;background:#64748b;display:inline-block}
+ .led.on{background:#22c55e}
+ #notify,.msg{max-width:640px;margin:1.2rem auto;padding:0 1rem}
+ #dash{height:calc(100vh - 51px)} #dash iframe{width:100%;height:100%;border:0;display:block;background:var(--bg)}
+ h2{font-size:1rem;margin:1.4rem 0 .4rem}
+ input,select,button.send{font:inherit;padding:.5rem;border:1px solid var(--line);border-radius:6px;width:100%;color:var(--text);background:var(--field)}
+ button.send{background:var(--btn);color:var(--btn-text);border:0;cursor:pointer;margin-top:.5rem} button.send:active{opacity:.8}
+ label{display:block;margin-top:.6rem;font-weight:600} code{background:var(--code);padding:.1rem .3rem;border-radius:4px}
+ pre{background:var(--code);padding:.6rem;border-radius:6px;overflow:auto;max-height:14rem;font-size:.8rem}
+ .pill{display:inline-block;padding:.1rem .5rem;border-radius:99px;font-size:.8rem;background:var(--pill)}
+ .alert{background:var(--alert)}.warn{background:var(--warn)}.ok{color:var(--ok)}.bad{color:var(--bad)}
+ ul{padding-left:1.1rem;margin:.3rem 0} #out{min-height:1.4em;margin-top:.4rem} [hidden]{display:none!important}
 </style>
-<h1>Phone alert server</h1>
-<div>Phones connected: <b id="n">0</b></div>
-<h2>Connect the phone app to</h2><ul id="urls"></ul>
-<h2>Send a notification</h2>
-<label>Title<input id="t" value="Truck approaching"></label>
-<label>Message<input id="m" value="Look left"></label>
-<label>Level<select id="l"><option value="alert">alert (strong buzz)</option><option value="warn">warn</option><option value="info">info</option></select></label>
-<button id="send">Send to phone</button><div id="out"></div>
-<h2>Connected phones</h2><ul id="clients"></ul>
-<h2>Recent</h2><ul id="recent"></ul>
+<header>
+ <b>SightLine</b>
+ <nav role="tablist" aria-label="Pages">
+  <button role="tab" id="tab-notify" aria-selected="true" aria-controls="notify">Notifications</button>
+  <button role="tab" id="tab-dash" aria-selected="false" aria-controls="dash">Dashboard <span class="led" id="led" title="dashboard status"></span></button>
+ </nav>
+ <button id="theme" type="button" aria-label="Switch to dark mode" title="Switch light / dark">
+  <svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+  <svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3M4.6 4.6l2.1 2.1M17.3 17.3l2.1 2.1M4.6 19.4l2.1-2.1M17.3 6.7l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+ </button>
+</header>
+
+<section id="notify" role="tabpanel" aria-labelledby="tab-notify">
+ <h1 style="font-size:1.3rem;margin:0 0 .2rem">Phone alerts</h1>
+ <div>Phones connected: <b id="n">0</b></div>
+ <h2>Connect the phone app to</h2><ul id="urls"></ul>
+ <h2>Send a notification</h2>
+ <label>Title<input id="t" value="Truck approaching"></label>
+ <label>Message<input id="m" value="Look left"></label>
+ <label>Level<select id="l"><option value="alert">alert (strong buzz)</option><option value="warn">warn</option><option value="info">info</option></select></label>
+ <button class="send" id="send">Send to phone</button><div id="out"></div>
+ <h2>Connected phones</h2><ul id="clients"></ul>
+ <h2>Recent</h2><ul id="recent"></ul>
+</section>
+
+<section id="dash" role="tabpanel" aria-labelledby="tab-dash" hidden>
+ <div id="dash-msg" class="msg" hidden></div>
+ <iframe id="dash-frame" title="Head-motion dashboard" hidden></iframe>
+</section>
+
 <script>
 const q = new URLSearchParams(location.search), token = q.get('token') || '';
 const H = token ? {'X-Token': token} : {};
 const $ = id => document.getElementById(id);
+
+// ---- theme (light / dark): saved in this browser, and sent to the dashboard frame
+function currentTheme() { return document.documentElement.getAttribute('data-theme'); }
+function syncFrame() {
+  const f = $('dash-frame');
+  if (f.contentWindow) f.contentWindow.postMessage({type: 'sightline-theme', value: currentTheme()}, '*');
+}
+function applyTheme(t, save) {
+  document.documentElement.setAttribute('data-theme', t);
+  $('theme').setAttribute('aria-label', t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+  if (save) { try { localStorage.setItem('sightline-theme', t); } catch (e) {} }
+  syncFrame();
+}
+$('theme').onclick = () => applyTheme(currentTheme() === 'dark' ? 'light' : 'dark', true);
+$('dash-frame').addEventListener('load', syncFrame);
+applyTheme(currentTheme(), false);
+
+// ---- tabs (the chosen tab survives a reload through the URL hash)
+function show(name) {
+  for (const t of ['notify', 'dash']) {
+    $('tab-' + t).setAttribute('aria-selected', t === name);
+    $(t).hidden = t !== name;
+  }
+  history.replaceState(null, '', name === 'dash' ? '#dashboard' : location.pathname + location.search);
+  if (name === 'dash') pollDash();
+}
+$('tab-notify').onclick = () => show('notify');
+$('tab-dash').onclick = () => show('dash');
+if (location.hash === '#dashboard') show('dash');
+
+// ---- notifications tab
 fetch('/api/urls', {headers: H}).then(r => r.json()).then(d => {
   $('urls').innerHTML = d.urls.map(u => '<li><code>' + u + '</code></li>').join('') || '<li>no network address found</li>';
 });
@@ -197,13 +355,50 @@ $('send').onclick = async () => {
   $('out').innerHTML = r.ok ? '<span class="ok">Sent to ' + d.delivered_to + ' phone(s)</span>' : '<span class="bad">' + (d.error || r.status) + '</span>';
   poll();
 };
+
+// ---- dashboard tab: the head-motion dashboard runs on its own port and is shown in a frame
+function dashMessage(html, log) {
+  const m = $('dash-msg');
+  m.innerHTML = html;
+  if (log && log.length) { const p = document.createElement('pre'); p.textContent = log.join('\\n'); m.appendChild(p); }
+  m.hidden = false;
+  $('dash-frame').hidden = true;
+}
+async function pollDash() {
+  let d;
+  try { d = await (await fetch('/api/dashboard', {headers: H})).json(); } catch (e) { return; }
+  $('led').className = 'led' + (d.reachable ? ' on' : '');
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+  if (d.reachable && (local || d.lan)) {
+    const base = location.protocol + '//' + location.hostname + ':' + d.port + '/';
+    if ($('dash-frame').dataset.base !== base) {
+      $('dash-frame').dataset.base = base;
+      $('dash-frame').src = base + '?theme=' + currentTheme();
+    }
+    $('dash-frame').hidden = false;
+    $('dash-msg').hidden = true;
+  } else if (d.reachable) {
+    dashMessage('<h2>Dashboard is running on the laptop</h2><p>It only accepts connections from the laptop itself. Open this page on the laptop at <code>http://localhost:' + location.port + '/#dashboard</code>, or restart the server with <code>--dashboard-lan</code> to open it from this device.</p>');
+  } else if (d.exit_code !== null) {
+    dashMessage('<h2>The dashboard stopped (exit code ' + d.exit_code + ')</h2><p>Last output:</p>', d.log);
+  } else if (d.managed) {
+    dashMessage('<h2>Starting the dashboard…</h2><p>The Muse can take up to a minute to connect.</p>', d.log);
+  } else if (!d.script_found) {
+    dashMessage('<h2>Dashboard code not found</h2><p>Expected <code>' + d.script + '</code>. The dashboard lives on the <code>sean/live-dashboard</code> branch until it is merged; point to it with <code>--dashboard-script</code>.</p>');
+  } else {
+    dashMessage('<h2>The dashboard is not running</h2><p>Restart this server with <code>--dashboard</code>, or start it yourself:</p><pre>' + d.command + '</pre>');
+  }
+}
 poll(); setInterval(poll, 2000);
+pollDash(); setInterval(pollDash, 3000);
 </script>
 """
 
 
-def create_app(hub: Optional[Hub] = None, token: Optional[str] = None, port: int = 8765) -> Flask:
+def create_app(hub: Optional[Hub] = None, token: Optional[str] = None, port: int = 8765,
+               dashboard: Optional[DashboardLink] = None) -> Flask:
     hub = hub or Hub()
+    dashboard = dashboard or DashboardLink()
     app = Flask(__name__)
     app.config["HUB"] = hub
 
@@ -231,6 +426,12 @@ def create_app(hub: Optional[Hub] = None, token: Optional[str] = None, port: int
         if not authorised():
             abort(401)
         return jsonify(hub.snapshot())
+
+    @app.get("/api/dashboard")
+    def dashboard_status():
+        if not authorised():
+            abort(401)
+        return jsonify(dashboard.status())
 
     @app.post("/notify")
     def notify():
@@ -312,10 +513,26 @@ def main(argv=None) -> None:
                    help="shared secret; phones and senders must send it (or set PHONE_ALERT_TOKEN)")
     p.add_argument("--mqtt", metavar="HOST[:PORT]", help="also forward MQTT alerts to the phones")
     p.add_argument("--mqtt-topic", default="sightline/alert", help="topic to forward (default: sightline/alert)")
+    p.add_argument("--dashboard", action="store_true",
+                   help="also start the head-motion dashboard (max/dashboard/app.py) and show it in the Dashboard tab")
+    p.add_argument("--dashboard-port", type=int, default=5000)
+    p.add_argument("--dashboard-script", help="path to dashboard/app.py (default: max/dashboard/app.py in this repo)")
+    p.add_argument("--dashboard-args", default="",
+                   help='extra arguments for the dashboard; use the = form: --dashboard-args="--board synthetic" '
+                        'or --dashboard-args="--source synthetic:joint"')
+    p.add_argument("--dashboard-lan", action="store_true",
+                   help="let other devices open the dashboard (it can start/stop recordings: only on a network you trust)")
     args = p.parse_args(argv)
 
     hub = Hub()
-    app = create_app(hub, args.token, args.port)
+    dash = DashboardLink(args.dashboard_port, args.dashboard_script, shlex.split(args.dashboard_args), lan=args.dashboard_lan)
+    app = create_app(hub, args.token, args.port, dash)
+    if args.dashboard:
+        try:
+            dash.start()
+            print(f"[dashboard] starting on port {args.dashboard_port} (tab: Dashboard)")
+        except FileNotFoundError as e:
+            print(f"[dashboard] {e}\n[dashboard] it lives on the sean/live-dashboard branch; use --dashboard-script to point to it")
     if args.mqtt:
         start_mqtt_bridge(hub, args.mqtt, args.mqtt_topic)
 
@@ -328,7 +545,10 @@ def main(argv=None) -> None:
 
     import logging
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
-    app.run(host=args.host, port=args.port, threaded=True, debug=False)
+    try:
+        app.run(host=args.host, port=args.port, threaded=True, debug=False)
+    finally:
+        dash.stop()
 
 
 if __name__ == "__main__":
