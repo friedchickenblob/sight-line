@@ -20,8 +20,11 @@ If the head data goes missing, the system buzzes anyway: when in doubt, warn the
 
 | Folder | What it is |
 |---|---|
+| `vision/` | Overhead camera pipeline: floor mapping from ArUco markers, YOLO detection, hazard distance and angles |
+| `stream_data/` | Streams a phone camera to the laptop over WebRTC, so a phone can be the overhead camera |
 | `max/` | Head motion from the Muse (yaw, drift, contact maths) and a live dashboard |
 | `phone-alert/` | Android app and a small server that send alerts from the laptop to a phone, with a control page that also shows the dashboard |
+| `requirements.txt` | Every Python package the repo needs, in one file |
 | `muse_collection.py` | Records raw Muse gyro and accelerometer data |
 | `.github/` | Issue and PR templates, checks, and the Claude workflows |
 
@@ -30,5 +33,7 @@ If the head data goes missing, the system buzzes anyway: when in doubt, warn the
 - **Set up your laptop and the repo:** [SETUP.md](SETUP.md)
 - **How we work** (branch names, commit format, pull requests): [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Rules for Claude in this repo:** [CLAUDE.md](CLAUDE.md)
+- **Vision (camera, hazard angles):** [docs/vision-hazard-plan.md](docs/vision-hazard-plan.md) and how to test it, [docs/vision-testing.md](docs/vision-testing.md)
+- **Phone camera stream:** [stream_data/README.md](stream_data/README.md)
 - **Phone alerts:** [phone-alert/README.md](phone-alert/README.md)
 - **Head motion:** [max/README.md](max/README.md)

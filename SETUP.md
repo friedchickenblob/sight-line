@@ -85,6 +85,19 @@ make hook
 
 `make hook` turns on the shared git hooks. They check your commit messages and branch names, and stop you from pushing to `main` by accident. Without `make`, run the same thing directly: `git config core.hooksPath .githooks`.
 
+### 4. Python environment (once per clone)
+
+All the Python code shares one requirements file at the repo root. From the repo root:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate              # macOS / Linux / WSL: source .venv/bin/activate
+pip install -r requirements.txt
+python -m pytest                    # runs every folder's tests
+```
+
+`ultralytics` pulls in PyTorch, so the first install is a large download.
+
 ## Contributing
 
 A short summary also lives in [`CONTRIBUTING.md`](CONTRIBUTING.md).
