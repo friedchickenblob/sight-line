@@ -5,7 +5,7 @@
     python -m vision.run_phone --calib floor_calib.json --layout floor_layout.json   # saved calibration
     python -m vision.run_phone --layout floor_layout.json --car-marker 4            # toy car tagged with marker 4
 
-It starts Sean's phone-stream server (stream_data/server.py) with this pipeline as its model:
+It starts Sean's phone-stream server (stream_data/stream_server.py) with this pipeline as its model:
 1. Phone and computer on the same Wi-Fi (or the phone's hotspot).
 2. Open the printed https://<this computer's IP>:8443 link in Chrome on the phone, accept the
    certificate warning (Advanced -> Proceed), tap Start streaming, allow the camera.
@@ -168,11 +168,11 @@ class PhoneHazardModel:
 
 
 def import_stream_server():
-    """stream_data/server.py does `from model import ...`, so its folder must be on sys.path."""
+    """stream_data/stream_server.py does `from model import ...`, so its folder must be on sys.path."""
     if str(STREAM_DIR) not in sys.path:
         sys.path.insert(0, str(STREAM_DIR))
-    import server                                   # noqa: E402  (stream_data/server.py)
-    return server
+    import stream_server                            # noqa: E402  (stream_data/stream_server.py)
+    return stream_server
 
 
 def main() -> None:

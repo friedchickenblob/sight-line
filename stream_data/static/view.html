@@ -69,7 +69,7 @@ async function refresh() {
       const f = shown.get(s.id) || figureFor(s);
       shown.set(s.id, f);
       f.querySelector(".st").textContent =
-        `${s.state} · ${s.frames_in} frames · model ${s.infer_ms} ms · ${s.frames_dropped} dropped`;
+        `${s.state} · ${s.frames_in} frames · model ${(s.infer_s * 1000).toFixed(0)} ms · ${s.frames_dropped} dropped`;
       f.querySelector("pre").textContent = s.latest ? JSON.stringify(s.latest) : "";
       const b = s.latest && s.latest.mean_brightness;
       f.querySelector(".st").innerHTML += (typeof b === "number" && b < 5)
