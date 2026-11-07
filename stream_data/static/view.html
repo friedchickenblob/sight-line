@@ -25,6 +25,8 @@
     pre { margin: 6px 0 0; font-size: 12px; white-space: pre-wrap; word-break: break-word; color: var(--muted);
           max-height: 120px; overflow-y: auto; }
     #empty { padding: 40px 20px; text-align: center; }
+    .err { color: #d1495b; margin-top: 4px; }
+    .dark { color: #d97706; }
   </style>
 </head>
 <body>
@@ -45,8 +47,13 @@ const shown = new Map();                     // session id -> figure
 function figureFor(s) {
   const f = document.createElement("figure");
   f.innerHTML = `<img alt="phone ${s.id} video"><figcaption>
-      <div class="stats"><span><b>phone ${s.id}</b></span><span class="st"></span></div><pre></pre></figcaption>`;
-  f.querySelector("img").src = `/video/${s.id}.mjpg`;
+      <div class="stats"><span><b>phone ${s.id}</b></span><span class="st"></span></div>
+      <div class="err" hidden>No picture from the server: check its terminal (missing Pillow?), then reload.</div>
+      <pre></pre></figcaption>`;
+  const img = f.querySelector("img");
+  img.onload = () => { f.querySelector(".err").hidden = true; };
+  img.onerror = () => { f.querySelector(".err").hidden = false; };
+  img.src = `/video/${s.id}.mjpg`;
   feeds.appendChild(f);
   return f;
 }
@@ -64,6 +71,9 @@ async function refresh() {
       f.querySelector(".st").textContent =
         `${s.state} · ${s.frames_in} frames · model ${s.infer_ms} ms · ${s.frames_dropped} dropped`;
       f.querySelector("pre").textContent = s.latest ? JSON.stringify(s.latest) : "";
+      const b = s.latest && s.latest.mean_brightness;
+      f.querySelector(".st").innerHTML += (typeof b === "number" && b < 5)
+        ? ' · <span class="dark">picture is black: is the camera covered?</span>' : "";
     }
     for (const [id, f] of shown) {
       if (!live.has(id)) { f.querySelector("img").src = ""; f.remove(); shown.delete(id); }
