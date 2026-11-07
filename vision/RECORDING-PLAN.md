@@ -188,12 +188,14 @@ and directions, with and without the worker nearby. Record a different floor or 
 ## Part 5. After recording: your steps
 
 1. **Copy the videos to the Mac** (AirDrop) into a folder outside the repo, e.g. `~/sightline-raw/`.
-2. **Install ffmpeg** once: `brew install ffmpeg`
-3. **Convert each clip** to a steady 30 fps (phones record a varying frame rate) and give it its letter:
+2. **Install ffmpeg** once: `brew install ffmpeg` (the script below falls back to OpenCV without it, but ffmpeg is better)
+3. **Convert and check each clip.** This converts it to a steady 30 fps (phones record a varying frame rate), names it by
+   its letter, and checks it: resolution, length, all four floor markers visible, and the marker sizes in pixels.
    ```bash
    cd ~/sight-line-prep/vision
-   ffmpeg -i ~/sightline-raw/IMG_1234.MOV -vf fps=30 -an clips/A.mp4
+   python scripts/prep_clip.py ~/sightline-raw/IMG_1234.MOV A      # -> clips/A.mp4
    ```
+   If it prints `PROBLEM:`, fix it before moving on (e.g. re-record if a floor marker is never seen).
    `clips/*.mp4` is git-ignored, so the videos stay out of the repo.
 4. **Upload** the raw and converted clips and the filled-in clip log to the **shared drive**, and send Hanh the link.
 5. **Set up the Python environment** if you haven't yet:
