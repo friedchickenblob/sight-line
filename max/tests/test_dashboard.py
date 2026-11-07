@@ -97,3 +97,46 @@ def test_stream_sends_rows_as_server_sent_events(tmp_path):
     assert len(snap["rows"]) == min(hub.seq, 2000) and snap["rows"][0][0] in (GYRO, "ACC")
     assert {"health", "yaw", "latest", "counts", "recording", "log"} <= set(snap)
     assert snap["yaws"] and len(snap["yaws"][0]) == 2          # yaw history for the chart, from the backlog too
+
+
+class FakePhone:
+    """Stands in for stream_data's PhoneStream (no aiortc needed here)."""
+    url = "https://192.168.1.23:8443"
+
+    def __init__(self, fail=False):
+        self.fail = fail
+
+    def status(self):
+        if self.fail:
+            raise TimeoutError("server busy")
+        return {"model": "null", "sessions": [{"id": 1, "state": "connected", "frames_in": 30, "frames_done": 30,
+                                               "frames_dropped": 0, "infer_s": 0.002, "elapsed_s": 1.0,
+                                               "latest": {"mean_brightness": 120.0}}]}
+
+    def mjpeg(self, session_id):
+        if session_id != 1:
+            return None
+        return iter([b"--frame\r\nContent-Type: image/jpeg\r\n\r\nJPEG\r\n"])
+
+
+def test_phone_card_is_off_without_phone(tmp_path):
+    c = create_app(_hub(tmp_path, [])).test_client()
+    assert c.get("/api/phone").get_json() == {"enabled": False}
+    assert c.get("/phone/video/1.mjpg").status_code == 404
+    assert b'id="phone-card"' in c.get("/").data
+
+
+def test_phone_status_and_video_come_through_the_dashboard(tmp_path):
+    c = create_app(_hub(tmp_path, []), FakePhone()).test_client()
+    p = c.get("/api/phone").get_json()
+    assert p["enabled"] and p["url"] == FakePhone.url and p["error"] is None
+    assert p["model"] == "null" and p["sessions"][0]["frames_in"] == 30
+    r = c.get("/phone/video/1.mjpg")
+    assert r.status_code == 200 and r.content_type.startswith("multipart/x-mixed-replace")
+    assert r.data.startswith(b"--frame")
+    assert c.get("/phone/video/2.mjpg").status_code == 404
+
+
+def test_phone_errors_show_on_the_page_not_as_a_500(tmp_path):
+    p = create_app(_hub(tmp_path, []), FakePhone(fail=True)).test_client().get("/api/phone").get_json()
+    assert p["enabled"] and "TimeoutError" in p["error"] and p["sessions"] == []
