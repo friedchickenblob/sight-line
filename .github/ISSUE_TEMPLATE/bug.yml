@@ -1,0 +1,46 @@
+name: Bug
+description: Something doesn't work the way it should
+title: "fix(area): short description"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write the title like a commit message: `fix(scope): description`, e.g. `fix(wristband): buzz arrives late`.
+
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have happened
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      description: Steps, commands, the branch or commit, and any error output.
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: hardware
+    attributes:
+      label: Hardware involved
+      multiple: true
+      options: [None, Camera, Muse S, Wristband, RC machine, Router / network, Demo laptop]
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Screenshots, logs, recordings (attach or link; don't commit them).

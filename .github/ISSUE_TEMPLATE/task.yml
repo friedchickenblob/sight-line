@@ -1,0 +1,68 @@
+name: Task
+description: A piece of work for one person (or for Claude overnight)
+title: "feat(area): short description"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write the title like a commit message: `type(scope): description`, e.g. `feat(vision): add ByteTrack tracking`.
+        One task per issue. To hand it to Claude overnight, add the `claude-ok` label after creating it.
+
+  - type: dropdown
+    id: owner
+    attributes:
+      label: Owner
+      description: Who is responsible for this (it becomes the branch prefix, e.g. zoe/...)
+      options: [jordan, hanh, zoe, sean, max]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - vision (detection, tracking)
+        - geometry (markers, floor map, head direction from camera)
+        - muse (gyro, head yaw, EEG)
+        - contact (approach maths)
+        - wristband / hardware
+        - fusion (alert rule)
+        - tooling (contract, recorder, simulator, CI)
+        - docs / pitch
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      description: What needs doing, and why. Link the relevant page of the research guide if there is one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: done-when
+    attributes:
+      label: Done when
+      description: How anyone (or Claude) can tell it's finished. Be concrete and checkable.
+      placeholder: |
+        - floor_calib.json exists and the 9-spot test has a median error under 5 cm
+        - tests in fusion/tests pass
+    validations:
+      required: true
+
+  - type: dropdown
+    id: hardware
+    attributes:
+      label: Needs hardware to test?
+      description: Tasks that need the camera, Muse, wristband or RC car aren't good for Claude overnight.
+      options: ["No", "Yes"]
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Anything else useful, such as files involved, data needed, or who to ask.

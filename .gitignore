@@ -1,0 +1,54 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.python-version
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+*.egg-info/
+build/
+dist/
+
+# --- Scratch files Claude writes when opening a pull request (see CLAUDE.md) ---
+.pr/
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Data: recordings, clips and datasets live on the shared drive, not in git ---
+data/
+datasets/
+recordings/
+*.jsonl
+*.xdf
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# --- Model weights and training output (Ultralytics) ---
+runs/
+*.pt
+*.onnx
+*.engine
+*_openvino_model/
+
+# --- Firmware builds (PlatformIO / Arduino) ---
+.pio/
+build-*/
+
+# --- Editors and OS ---
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,33 @@
+name: Protect main
+
+# Flags any commit that lands on main without going through a merged pull request.
+# GitHub Actions run after a push, so they can report it but can't stop it.
+# The actual block is the "Protect main" branch ruleset described in the README.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  via-pull-request:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if main was pushed to directly
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          PUSHER: ${{ github.actor }}
+        run: |
+          # GitHub can take a few seconds to link a merge commit to its pull request
+          for attempt in 1 2 3; do
+            merged=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq '[.[] | select(.merged_at != null)] | length')
+            [ "$merged" -gt 0 ] && { echo "Commit $SHA came from a merged pull request."; exit 0; }
+            sleep 10
+          done
+          echo "::error::$PUSHER pushed ${SHA:0:7} directly to main. Changes to main must go through a pull request."
+          echo "Please open a pull request from a branch instead, and turn on the local hooks with: make hook"
+          exit 1

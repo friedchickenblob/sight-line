@@ -1,0 +1,53 @@
+#!/bin/sh
+# Checks that a commit message follows the project format.
+# Usage: check-commit-msg <file containing the message>
+# Shared by the local commit-msg hook and the "Commit format" GitHub Action.
+
+pattern='^(docs|style|feat|fix|refactor|test|build|ci|chore)(\([^()]+\))?!?: [^ ]'
+
+# First line that isn't blank or a git comment
+subject=$(awk '!/^#/ && NF { print; exit }' "$1")
+
+# Merge commits that git writes itself are allowed as-is
+case "$subject" in
+  "Merge "*) exit 0 ;;
+esac
+
+if printf '%s\n' "$subject" | grep -Eq "$pattern"; then
+  exit 0
+fi
+
+cat >&2 <<EOF
+
+  ERROR: commit message doesn't follow the project format.
+
+    You wrote:  "$subject"
+
+  Format:
+    type(scope): description
+    type(scope)!: description       <- add ! for a breaking change
+
+  type is one of:
+    docs       documentation only
+    style      formatting, whitespace, no code change
+    feat       a new feature
+    fix        a bug fix
+    refactor   a code change that neither fixes a bug nor adds a feature
+    test       adding or fixing tests
+    build      build system or dependencies
+    ci         CI configuration (GitHub Actions)
+    chore      anything else: tooling, cleanup, config
+
+  (scope) is optional and can be anything, e.g. (vision), (wristband), (fusion).
+  Put one space after the colon, then a short description.
+
+  Examples:
+    feat(vision): add ByteTrack tracking to the camera loop
+    fix(wristband): turn off Wi-Fi sleep to cut buzz latency
+    docs: add research guides for each teammate
+    refactor(fusion): split the alert rule into its own module
+    chore(deps): bump ultralytics to 8.4
+    feat(api)!: rewrite auth logic
+
+EOF
+exit 1

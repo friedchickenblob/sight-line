@@ -1,0 +1,28 @@
+name: Branch name
+
+# Every branch except main must be named <owner>/<what-it-implements>,
+# e.g. jordan/claude-rules. The rule itself lives in .githooks/check-branch-name.
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  branch-name:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || !github.event.deleted
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check branch name
+        env:
+          BRANCH: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+        run: |
+          if ! sh .githooks/check-branch-name "$BRANCH"; then
+            echo "::error::Branch '$BRANCH' must be named <owner>/<what-it-implements>, e.g. jordan/claude-rules"
+            exit 1
+          fi
+          echo "Branch '$BRANCH' follows the format."
