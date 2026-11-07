@@ -39,4 +39,13 @@ Rig: 1.5 × 0.8 m floor, camera on the ceiling 2.5 m up, looking straight down, 
 - **Head tilt** (facing the 0–1 side): looking down reads −89° (about 1° shift), looking up reads −102° (about 12° shift). Past those tilts the marker is lost, which is where the gyro has to carry the reading.
 - **Hidden marker:** still read with arms raised, leaning, reaching, and at the floor edges.
 
-**Hardhat position:** with the marker on a 7 cm box over marker 4 (1.00, 0.30) and `MARKER_H_M = 0.08`, it read (1.03, 0.25), about 6 cm off. `NADIR` is now measured with a plumb line at (0.85, 0.60). Position on a worn hardhat is not measured yet.
+**Hardhat position** (`NADIR = (0.85, 0.60)`, measured with a plumb line from the lens):
+
+| Test | Should read | Read | Error |
+|---|---|---|---|
+| Marker on a 7 cm box over marker 4 | (1.00, 0.30) | (1.03, 0.25) | ~6 cm |
+| Hardhat directly under the lens | (0.85, 0.60) | (0.84, 0.56) | ~4 cm |
+| Hardhat raised on a stand over marker 4 | (1.00, 0.30) | (1.03, 0.30) | ~3 cm |
+
+When the hardhat is worn, the reading is only as good as where the head actually is: one worn test read 90 cm off because the head wasn't over the marker. Set `MARKER_H_M` to the wearer's hardhat-top height. The worker's floor position should still come from body tracking; the hardhat marker's main job is yaw.
+
