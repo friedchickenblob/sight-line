@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light dark;
   --bg: #f5f6f8;
   --card: #ffffff;
   --text: #1c2027;
@@ -13,8 +14,9 @@
   --s3: #1f9d55;
   --grid: #eceef2;
 }
+/* Follows the system theme, unless data-theme is set (the SightLine control page switches it: static/theme.js). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #111418;
     --card: #1a1e24;
     --text: #e6e8eb;
@@ -29,6 +31,23 @@
     --s3: #3fbf74;
     --grid: #252a32;
   }
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111418;
+  --card: #1a1e24;
+  --text: #e6e8eb;
+  --muted: #98a2b3;
+  --line: #2b313a;
+  --accent: #5b93f0;
+  --ok: #3fbf74;
+  --warn: #f0a33c;
+  --bad: #ef6b7d;
+  --s1: #5b93f0;
+  --s2: #f0a33c;
+  --s3: #3fbf74;
+  --grid: #252a32;
 }
 
 * { box-sizing: border-box; }
