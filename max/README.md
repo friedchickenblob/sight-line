@@ -16,7 +16,7 @@ step by step from installing Python to the live dashboard, plus common errors an
 python -m venv .venv
 .venv\Scripts\activate             # Git Bash: source .venv/Scripts/activate
 pip install -r ../requirements.txt    # the repo-wide requirements file
-python -m pytest                   # 120 tests, synthetic data + BrainFlow's synthetic board, ~1-2 min
+python -m pytest                   # 123 tests, synthetic data + BrainFlow's synthetic board, ~1-2 min
 python scripts/make_fake_data.py   # one fake recording per experiment -> data/fake/
 python scripts/live_yaw.py --source synthetic:joint      # watch fake live yaw
 python scripts/simulate_contact.py --plot out/contact.png
@@ -35,7 +35,14 @@ python scripts/live_yaw.py --mqtt localhost          # also publish head_yaw + m
 ```bash
 python dashboard/app.py                          # Muse S; open http://127.0.0.1:5000
 python dashboard/app.py --source synthetic:joint # no headband: fake session in real time
+python dashboard/app.py --phone                  # also stream a phone camera onto the dashboard
 ```
+
+With `--phone`, the phone-camera server from [`stream_data/`](../stream_data/README.md)
+runs in the same process: open the printed `https://<IP>:8443` link in Chrome on the
+phone, and the **Phone camera** card shows its live video and model output beside the
+head yaw. `--phone-model yolo` draws YOLO boxes. Through the phone-alert control page:
+`python server.py --dashboard --dashboard-args="--phone"` from `phone-alert/server/`.
 
 Every CSV field live (GYRO, ACC, CAM, MARK, RESET, DROP rows: `kind, t, v0, v1, v2`),
 head yaw, stream health, gyro / accel / yaw charts, and buttons to **start and stop
