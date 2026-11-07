@@ -1,0 +1,31 @@
+#!/bin/sh
+# Blocks pushing straight to main, and pushing branches that don't follow <owner>/<what-it-does>.
+# Enable once per clone with: make hook  (or: git config core.hooksPath .githooks)
+
+zero=0000000000000000000000000000000000000000
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/*) branch=${remote_ref#refs/heads/} ;;
+    *) continue ;;                                  # tags and other refs aren't checked
+  esac
+
+  if [ "$branch" = "main" ]; then
+    cat >&2 <<'EOF'
+
+  ERROR: pushing directly to main isn't allowed.
+
+  Put your work on a branch and open a pull request instead:
+    git switch -c <owner>/<what-it-implements>      e.g. jordan/claude-rules
+    git push -u origin HEAD
+
+EOF
+    exit 1
+  fi
+
+  # Deleting a remote branch is always fine
+  [ "$local_sha" = "$zero" ] && continue
+
+  sh "$(dirname "$0")/check-branch-name" "$branch" || exit 1
+done
+exit 0

@@ -1,0 +1,4 @@
+# Shell hooks and workflows must keep LF line endings, or they break on Windows checkouts
+.githooks/* text eol=lf
+*.yml text eol=lf
+Makefile text eol=lf

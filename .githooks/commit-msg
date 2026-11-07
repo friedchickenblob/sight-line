@@ -1,0 +1,12 @@
+#!/bin/sh
+# Rejects commits whose message doesn't follow the project format.
+# Enable once per clone with: make hook  (or: git config core.hooksPath .githooks)
+
+if ! sh "$(dirname "$0")/check-commit-msg" "$1"; then
+  cat >&2 <<'EOF'
+  Your commit was NOT made. Your message is saved; fix and retry with:
+    git commit -e -F .git/COMMIT_EDITMSG
+
+EOF
+  exit 1
+fi

@@ -1,0 +1,40 @@
+#!/bin/sh
+# Checks that a branch name follows the project format: <owner>/<what-it-does>
+# Usage: check-branch-name <branch name>
+# Shared by the local pre-push and post-checkout hooks and the "Branch name" GitHub Action.
+
+pattern='^(jordan|hanh|zoe|sean|max)/[a-z0-9]+(-[a-z0-9]+)*$'
+
+branch=$1
+
+# main is handled by its own rules (no direct pushes)
+[ "$branch" = "main" ] && exit 0
+
+if printf '%s\n' "$branch" | grep -Eq "$pattern"; then
+  exit 0
+fi
+
+cat >&2 <<EOF
+
+  ERROR: branch name doesn't follow the project format.
+
+    Branch:  "$branch"
+
+  Format:
+    owner/what-it-implements
+
+  owner is one of:  jordan, hanh, zoe, sean, max
+  what-it-implements is lowercase words joined by hyphens (a-z, 0-9, -).
+
+  Examples:
+    jordan/claude-rules
+    zoe/bytetrack-tracking
+    hanh/floor-homography
+    max/gyro-drift-test
+    sean/wristband-firmware
+
+  Rename your current branch with:
+    git branch -m <owner>/<what-it-implements>
+
+EOF
+exit 1

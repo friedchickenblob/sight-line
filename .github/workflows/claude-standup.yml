@@ -1,0 +1,51 @@
+name: Claude nightly standup
+
+# Every night Claude posts a short standup to the open "Standup log" issue:
+# what got done, what's in review, what's blocked or overdue.
+# It only reads issues and pull requests and writes that one comment; it never changes code.
+on:
+  schedule:
+    - cron: "0 6 * * *"     # 06:00 UTC = 11 pm in Alberta (MST, UTC-7). GitHub cron is always UTC.
+  workflow_dispatch:         # "Run workflow" button in the Actions tab, for testing
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  id-token: write
+
+jobs:
+  standup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}     # lets Claude use the gh CLI on this repo
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Write tonight's standup for the SightLine hackathon team (jordan, hanh, zoe, sean, max)
+            for the repository ${{ github.repository }}. Use only the gh CLI to read data.
+
+            1. Issues closed and pull requests merged in the last 24 hours.
+            2. Open pull requests waiting for review, and how long each has waited.
+            3. Open issues labelled "blocked".
+            4. Open issues whose milestone due date has passed.
+
+            Post exactly one comment on the open issue titled "Standup log". If that issue doesn't
+            exist, create it with the label "standup" first. Format the comment as:
+
+            ## Standup <today's date>
+            **Done** / **In review** / **Blocked** / **Overdue**, each a short bullet list grouped by
+            person (use the assignee, or the owner part of the branch name, e.g. zoe/...).
+            Write "nothing" under a heading that's empty. Keep the whole comment under 25 lines.
+
+            Don't edit code, labels, issues or pull requests other than posting that one comment.
+          claude_args: >-
+            --max-turns 15
+            --allowedTools "Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh issue create:*),Bash(gh issue comment:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh api:*),Bash(date:*)"
