@@ -41,7 +41,7 @@ cd max
 python -m venv .venv
 .venv\Scripts\Activate.ps1           # cmd: .venv\Scripts\activate.bat   Git Bash: source .venv/Scripts/activate
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r ../requirements.txt   # one requirements file for the whole repo
 ```
 
 Your prompt now starts with `(.venv)`. **Every new terminal needs the activate line
@@ -150,7 +150,7 @@ Or use cmd and `.venv\Scripts\activate.bat`.
 
 **`ModuleNotFoundError: No module named 'flask'` (or `brainflow`, `numpy`, ...)**
 The virtual environment isn't active in this terminal. From the `max` folder run
-`.venv\Scripts\Activate.ps1`, then retry. If it still fails: `pip install -r requirements.txt`.
+`.venv\Scripts\Activate.ps1`, then retry. If it still fails: `pip install -r ../requirements.txt`.
 
 **BrainFlow can't load its library (`OSError: ... BoardController.dll` / "the specified module could not be found")**
 BrainFlow ships its own DLLs, which need the Microsoft Visual C++ runtime. Install the

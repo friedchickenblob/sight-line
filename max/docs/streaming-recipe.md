@@ -20,7 +20,7 @@ Firmware (Muse app → settings): `__________`
 cd max
 python -m venv .venv
 .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r ../requirements.txt
 ```
 
 The Muse must **not** be connected to the Muse phone app or any other program, or
