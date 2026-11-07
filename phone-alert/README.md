@@ -18,7 +18,7 @@ From the repo's `max/` virtual environment (it already has Flask) or any Python 
 
 ```bash
 cd phone-alert/server
-pip install -r requirements.txt
+pip install -r ../../requirements.txt     # the repo-wide requirements file
 python server.py
 ```
 

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SightLine viewer</title>
+  <style>
+    :root { --bg: #f5f6f8; --card: #fff; --text: #1c2027; --muted: #667085; --line: #e3e6eb; --ok: #1f9d55; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #111418; --card: #1a1e24; --text: #e6e8eb; --muted: #98a2b3; --line: #2b313a; --ok: #3fbf74; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+           font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; padding: 14px 20px;
+             border-bottom: 1px solid var(--line); background: var(--card); }
+    h1 { font-size: 18px; margin: 0; }
+    .muted { color: var(--muted); }
+    main { padding: 16px 20px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); }
+    figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+    figure img { display: block; width: 100%; background: #000; min-height: 120px; }
+    figcaption { padding: 10px 12px; }
+    .stats { display: flex; flex-wrap: wrap; gap: 4px 14px; font-variant-numeric: tabular-nums; }
+    .stats b { color: var(--ok); }
+    pre { margin: 6px 0 0; font-size: 12px; white-space: pre-wrap; word-break: break-word; color: var(--muted);
+          max-height: 120px; overflow-y: auto; }
+    #empty { padding: 40px 20px; text-align: center; }
+    .err { color: #d1495b; margin-top: 4px; }
+    .dark { color: #d97706; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SightLine · live phone video</h1>
+    <span class="muted" id="model">model: –</span>
+  </header>
+  <div id="empty" class="muted">
+    No phone streaming yet. Open this server's <b>https://</b> link on the phone and tap <b>Start streaming</b>.
+  </div>
+  <main id="feeds"></main>
+
+<script>
+"use strict";
+const feeds = document.getElementById("feeds");
+const shown = new Map();                     // session id -> figure
+
+function figureFor(s) {
+  const f = document.createElement("figure");
+  f.innerHTML = `<img alt="phone ${s.id} video"><figcaption>
+      <div class="stats"><span><b>phone ${s.id}</b></span><span class="st"></span></div>
+      <div class="err" hidden>No picture from the server: check its terminal (missing Pillow?), then reload.</div>
+      <pre></pre></figcaption>`;
+  const img = f.querySelector("img");
+  img.onload = () => { f.querySelector(".err").hidden = true; };
+  img.onerror = () => { f.querySelector(".err").hidden = false; };
+  img.src = `/video/${s.id}.mjpg`;
+  feeds.appendChild(f);
+  return f;
+}
+
+async function refresh() {
+  try {
+    const st = await (await fetch("/status", { cache: "no-store" })).json();
+    document.getElementById("model").textContent = `model: ${st.model}`;
+    const live = new Set();
+    for (const s of st.sessions) {
+      if (s.state === "closed" || s.state === "failed") continue;
+      live.add(s.id);
+      const f = shown.get(s.id) || figureFor(s);
+      shown.set(s.id, f);
+      f.querySelector(".st").textContent =
+        `${s.state} · ${s.frames_in} frames · model ${(s.infer_s * 1000).toFixed(0)} ms · ${s.frames_dropped} dropped`;
+      f.querySelector("pre").textContent = s.latest ? JSON.stringify(s.latest) : "";
+      const b = s.latest && s.latest.mean_brightness;
+      f.querySelector(".st").innerHTML += (typeof b === "number" && b < 5)
+        ? ' · <span class="dark">picture is black: is the camera covered?</span>' : "";
+    }
+    for (const [id, f] of shown) {
+      if (!live.has(id)) { f.querySelector("img").src = ""; f.remove(); shown.delete(id); }
+    }
+    document.getElementById("empty").hidden = shown.size > 0;
+  } catch (e) { /* server restarting: try again next tick */ }
+}
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>
