@@ -1,0 +1,4 @@
+brainflow>=5.23
+numpy>=1.26
+pylsl>=1.16
+pytest>=8

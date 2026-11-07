@@ -13,6 +13,7 @@
 |---|---|---|
 | YOLO26 (Ultralytics) | [docs.ultralytics.com/models/yolo26](https://docs.ultralytics.com/models/yolo26) | Detecting the worker and the machine |
 | Muse LSL | [github.com/alexandrebarachant/muse-lsl](https://github.com/alexandrebarachant/muse-lsl) | Streaming the Muse S gyro and EEG into Python |
+| BrainFlow | [brainflow.readthedocs.io](https://brainflow.readthedocs.io/) | Direct Muse S connection for `brainflow_collection.py` ([guide](docs/brainflow-collection.md)) |
 | SH17 dataset | [keaipublishing.com news page](https://www.keaipublishing.com/en/news/sh17-a-dataset-for-human-safety-and-personal-protective-equipment-detection-in-manufacturing-industry/) | Real factory footage of people and PPE |
 | OpenConstruction dataset survey (covers MOCS) | [Google Drive](https://drive.google.com/file/d/1B3jLSMNxWHQJXdcHUngA6XiOkbNOdYLX/) | Construction-site datasets, incl. MOCS |
 | Roboflow ForkliftProject | [universe.roboflow.com/models-8ewny/forkliftproject](https://universe.roboflow.com/models-8ewny/forkliftproject) | A forklift detector to start from |
