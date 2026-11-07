@@ -24,11 +24,13 @@ class Detection:
     conf: float
     box: tuple[float, float, float, float]     # x1, y1, x2, y2 pixels
     track_id: int | None = None
+    ground: tuple[float, float] | None = None  # set when the floor point isn't the box bottom (marker tags)
+    source: str = "yolo"                       # "yolo" | "marker"
 
     @property
     def ground_px(self) -> tuple[float, float]:
-        """Where it touches the floor in the image (bottom-centre of the box)."""
-        return ground_point(self.box)
+        """Where it touches the floor in the image (bottom-centre of the box, unless set)."""
+        return self.ground if self.ground is not None else ground_point(self.box)
 
 
 def kind_of(label: str, vehicle_labels=VEHICLE_LABELS) -> str | None:
@@ -41,11 +43,16 @@ def kind_of(label: str, vehicle_labels=VEHICLE_LABELS) -> str | None:
 
 class Detector:
     def __init__(self, model: str = "yolo26n.pt", conf: float = 0.35, imgsz: int = 640,
-                 track: bool = True, vehicle_labels=VEHICLE_LABELS, device: str | None = None):
+                 track: bool = True, vehicle_labels=VEHICLE_LABELS, device: str | None = None,
+                 vehicle_conf: float | None = None):
+        """vehicle_conf: a lower threshold for vehicles than for people (toy cars score low).
+        With tracking on, ByteTrack only starts tracks above ~0.25, so going lower needs track=False."""
         from ultralytics import YOLO   # imported here so the rest of vision/ works without it
 
         self.model = YOLO(model)
+        self.weights = model
         self.conf, self.imgsz, self.track, self.device = conf, imgsz, track, device
+        self.vehicle_conf = conf if vehicle_conf is None else vehicle_conf
         self.vehicle_labels = frozenset(vehicle_labels)
         names = self.model.names
         self.class_ids = [i for i, n in names.items() if kind_of(n, self.vehicle_labels)]
@@ -54,7 +61,7 @@ class Detector:
             raise ValueError(f"model has no classes {sorted(unknown)}; it knows {sorted(names.values())}")
 
     def __call__(self, frame: np.ndarray) -> list[Detection]:
-        kw = dict(conf=self.conf, imgsz=self.imgsz, classes=self.class_ids, verbose=False, device=self.device)
+        kw = dict(conf=min(self.conf, self.vehicle_conf), imgsz=self.imgsz, classes=self.class_ids, verbose=False, device=self.device)
         if self.track:
             r = self.model.track(frame, persist=True, tracker="bytetrack.yaml", **kw)[0]
         else:
@@ -70,7 +77,7 @@ class Detector:
         for b, c, p, i in zip(xyxy, cls, conf, ids):
             label = r.names[int(c)]
             kind = kind_of(label, self.vehicle_labels)
-            if kind:
+            if kind and p >= (self.vehicle_conf if kind == "vehicle" else self.conf):
                 out.append(Detection(kind, label, float(p), tuple(float(v) for v in b),
                                      None if i is None else int(i)))
         return out

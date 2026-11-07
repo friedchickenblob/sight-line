@@ -31,12 +31,13 @@ def project(xyz):
     return (K @ (pc / pc[:, 2:3]).T).T[:, :2]
 
 
-def render(rotate_marker: int | None = None):
+def render(rotate_marker: int | None = None, extra: dict | None = None):
+    """The floor seen by the angled camera; `extra` adds markers {id: (x, y)} (e.g. a tag on a car)."""
     S, ox, oy = 400, 0.5, 2.5               # canvas: 400 px/m covering x -0.5..3.5, y -0.5..2.5
     canvas = np.full((int(3.0 * S), int(4.0 * S)), 255, np.uint8)
     dic = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
     side = int(LAYOUT.marker_size_m * S)
-    for mid, (cx, cy) in LAYOUT.markers.items():
+    for mid, (cx, cy) in {**LAYOUT.markers, **(extra or {})}.items():
         m = cv2.aruco.generateImageMarker(dic, mid, side)
         if mid == rotate_marker:
             m = np.rot90(m).copy()
