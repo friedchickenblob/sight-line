@@ -12,6 +12,10 @@ so the string puller and people in the background are ignored.
 
 Floor map, best first: Hanh's geometry.py (when it lands) -> fitted from floor markers 0-3 in the
 clip, using the measured positions in clips/floor.json (floor_map.py) -> pixels / 500 placeholder.
+The fitted map is refitted every REFIT_EVERY_S from the last place each floor marker was seen, so a
+camera that sags or gets bumped mid-clip is followed, and one marker hidden by a person doesn't stop it.
+For a video file, each marker's first sighting anywhere in the clip seeds the map, so a marker that is
+covered at the start doesn't force the placeholder.
 """
 import csv, sys, time
 from collections import deque
@@ -25,7 +29,9 @@ try:
 except ImportError:
     H = None
     to_floor = floor_map.to_floor
-FIT_WITHIN_FRAMES = 90  # look this long for all four floor markers before falling back to the placeholder
+FIT_WITHIN_FRAMES = 90  # live camera: look this long for all four floor markers before using the placeholder
+REFIT_EVERY_S = 1.0     # refit the floor map this often, so a sagging or bumped camera doesn't skew positions
+MOVED_PX = 10           # report when a floor marker has moved this far since the last report
 
 try:
     from pylsl import local_clock
@@ -108,6 +114,24 @@ def frames(source):
         cap.release()
 
 
+def first_sightings(path, step=5):
+    """Video file: the first pixel centre of each floor marker anywhere in the clip, {id: (u, v)}.
+    Looks at every `step`-th frame and stops once all four are found."""
+    cap, found, i = cv2.VideoCapture(path), {}, 0
+    try:
+        while len(found) < len(floor_map.FLOOR_IDS) and cap.grab():
+            if i % step == 0:
+                ok, frame = cap.retrieve()
+                if ok:
+                    for k, c in floor_map.detect(frame).items():
+                        if k in floor_map.FLOOR_IDS and k not in found:
+                            found[k] = c.mean(axis=0)
+            i += 1
+    finally:
+        cap.release()
+    return found
+
+
 def run(source, out_csv=None, machine_by="marker"):
     model = YOLO(WEIGHTS)
     lock, vel = MachineLock(), {}
@@ -119,19 +143,39 @@ def run(source, out_csv=None, machine_by="marker"):
     if H_ is None and cfg is None:
         print(f"no {floor_map.CONFIG}: using the pixels/500 placeholder (copy clips/floor.example.json)")
         H_ = floor_map.PLACEHOLDER_H
+    fitting = H_ is None  # fit (and keep refitting) the floor map from the markers in the clip
+    last_px = {}          # floor marker id -> last pixel centre seen
+    if fitting and not isinstance(source, int):
+        last_px = first_sightings(source)
+        missing = [k for k in floor_map.FLOOR_IDS if k not in last_px]
+        if missing:
+            print(f"floor markers {missing} never seen in the clip: using the placeholder")
+            H_, fitting = floor_map.PLACEHOLDER_H, False
+    reported_px, last_fit_t, n_fits = dict(last_px), None, 0
     for i, (t, frame) in enumerate(frames(source)):
-        if H_ is None:  # fit the floor map from the markers in the clip
-            H_, err = floor_map.fit_from_frame(frame, cfg["markers_m"])
-            if H_ is not None:
-                print(f"floor map fitted from markers 0-3 at frame {i} (fit error {err * 100:.1f} cm)")
-            elif i + 1 >= FIT_WITHIN_FRAMES:
-                print(f"floor markers 0-3 not all seen in {FIT_WITHIN_FRAMES} frames: using the placeholder")
-                H_ = floor_map.PLACEHOLDER_H
-            else:
-                continue
+        found = floor_map.detect(frame)
+        if fitting:
+            last_px.update({k: c.mean(axis=0) for k, c in found.items() if k in floor_map.FLOOR_IDS})
+            if last_fit_t is None or t - last_fit_t >= REFIT_EVERY_S:
+                H_new, err = floor_map.fit_from_centres(last_px, cfg["markers_m"])
+                if H_new is not None:
+                    if H_ is None:
+                        print(f"floor map fitted from markers 0-3 at frame {i} (fit error {err * 100:.1f} cm)")
+                    H_, last_fit_t, n_fits = H_new, t, n_fits + 1
+                    reported_px = reported_px or dict(last_px)  # live camera: first fit is the reference
+                    moved = max(np.linalg.norm(last_px[k] - reported_px[k]) for k in floor_map.FLOOR_IDS)
+                    if moved >= MOVED_PX:
+                        print(f"t={t:.1f} s: floor markers moved {moved:.0f} px (camera moved), map refitted")
+                        reported_px = dict(last_px)
+            if H_ is None:
+                if i + 1 >= FIT_WITHIN_FRAMES:
+                    print(f"floor markers 0-3 not all seen in {FIT_WITHIN_FRAMES} frames: using the placeholder")
+                    H_, fitting = floor_map.PLACEHOLDER_H, False
+                else:
+                    continue
         machines, workers = [], []
         if machine_by == "marker":
-            c = floor_map.detect(frame).get(MACHINE_MARKER_ID)
+            c = found.get(MACHINE_MARKER_ID)
             if c is not None:
                 (xm, ym), = to_floor(H_, [c.mean(axis=0)])
                 h = cfg.get("machine_marker_height_m", 0.0) if cfg else 0.0
@@ -169,6 +213,8 @@ def run(source, out_csv=None, machine_by="marker"):
                 writer.writerow([f"{t:.4f}", tid, cls, f"{xm:.3f}", f"{ym:.3f}", f"{vx:.3f}", f"{vy:.3f}"])
             else:
                 print(f"{t:9.3f} {cls:7s} id={tid:<3} ({xm:5.2f},{ym:5.2f}) m  v=({vx:+.2f},{vy:+.2f}) m/s")
+    if fitting:
+        print(f"floor map refitted {n_fits} times")
 
 
 if __name__ == "__main__":

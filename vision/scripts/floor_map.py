@@ -58,8 +58,13 @@ def in_rig(xy, markers_m, margin_m=0.3):
 
 def fit_from_frame(frame, markers_m):
     """Fit H from one frame. Returns (H, worst_error_m), or (None, None) if a floor marker is missing."""
-    found = detect(frame)
-    seen = {i: c.mean(axis=0) for i, c in found.items() if i in markers_m}
+    return fit_from_centres({i: c.mean(axis=0) for i, c in detect(frame).items()}, markers_m)
+
+
+def fit_from_centres(centres, markers_m):
+    """Fit H from floor-marker centre pixels {id: (u, v)}, e.g. the last place each marker was seen.
+    Returns (H, worst_error_m), or (None, None) if a floor marker is missing."""
+    seen = {i: c for i, c in centres.items() if i in markers_m}
     if not all(i in seen for i in FLOOR_IDS):
         return None, None
     keys = sorted(seen)
