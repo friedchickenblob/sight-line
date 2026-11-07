@@ -4,17 +4,27 @@
     python dashboard/app.py --board synthetic             # BrainFlow's fake board, no headband
     python dashboard/app.py --source synthetic:joint      # synthetic recording, played in real time
     python dashboard/app.py --source replay:data/raw/session.csv
+    python dashboard/app.py --phone                       # also stream a phone camera (stream_data/)
+    python dashboard/app.py --phone --phone-model yolo    # ... with YOLO boxes on the video
 
 Then open http://127.0.0.1:5000. Start/Stop writes a CSV to data/raw/ in the same
 format as record.py (kind,t,v0,v1,v2), so analyze.py and replay read it as is.
 Mark and Re-zero add MARK / RESET rows, like pressing Enter in record.py / live_yaw.py.
 
 The browser gets updates ~10 times a second over Server-Sent Events (/stream).
+
+With --phone the phone-camera server from stream_data/ runs in this same process, on its
+own port (8443, HTTPS, because the phone's browser needs it for the camera). Open the
+link the dashboard prints on the phone. The dashboard shows the phone's video and model
+output in a "Phone camera" card; it fetches them in-process (/api/phone and
+/phone/video/<id>.mjpg), so the dashboard page stays plain http://127.0.0.1:5000.
+Frames and Muse samples are both stamped with pylsl.local_clock().
 """
 from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 import sys
 import threading
@@ -34,6 +44,7 @@ from headmotion.sources import DROP, MARK, RESET, CsvRecorder, Sample  # noqa: E
 from headmotion.yaw import HeadYawEstimator, YawPipeline  # noqa: E402
 
 RAW_DIR = ROOT / "data" / "raw"
+PHONE_DIR = ROOT.parent / "stream_data"
 TICK_S = 0.1
 
 
@@ -219,7 +230,8 @@ class Hub:
             )
 
 
-def create_app(hub: Hub) -> Flask:
+def create_app(hub: Hub, phone=None) -> Flask:
+    """phone: a running stream_data PhoneStream (--phone), or None."""
     app = Flask(__name__)
 
     @app.get("/")
@@ -266,7 +278,47 @@ def create_app(hub: Hub) -> Flask:
         hub.rezero()
         return jsonify(ok=True)
 
+    # -- phone camera (--phone)
+    @app.get("/api/phone")
+    def phone_status():
+        if phone is None:
+            return jsonify(enabled=False)
+        try:
+            st = phone.status()
+        except Exception as e:                       # server thread stopped or busy: say so on the page
+            return jsonify(enabled=True, url=phone.url, error=f"{type(e).__name__}: {e}", model=None, sessions=[])
+        return jsonify(enabled=True, url=phone.url, error=None, **st)
+
+    @app.get("/phone/video/<int:session_id>.mjpg")
+    def phone_video(session_id: int):
+        frames = phone.mjpeg(session_id) if phone is not None else None
+        if frames is None:
+            return jsonify(ok=False, error=f"no phone {session_id}"), 404
+        return Response(frames, content_type="multipart/x-mixed-replace; boundary=frame",
+                        headers={"Cache-Control": "no-cache"})
+
     return app
+
+
+def open_phone_stream(args):
+    """Start stream_data's phone-camera server in this process (--phone)."""
+    if str(PHONE_DIR) not in sys.path:
+        sys.path.insert(0, str(PHONE_DIR))            # stream_server does `from model import ...`
+    try:
+        import stream_server
+        from model import load_model
+    except ImportError as e:
+        raise SystemExit(f"--phone needs the phone-stream packages ({e.name}): "
+                         "pip install -r requirements.txt from the repo root") from e
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
+    for noisy in ("aioice", "aiortc", "aiohttp.access"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    model = load_model(args.phone_model)
+    ctx = None if args.phone_no_https else stream_server.https_context(stream_server.lan_ip(), args.phone_new_cert)
+    try:
+        return stream_server.PhoneStream(model, args.phone_host, args.phone_port, ctx, args.phone_view_fps).start()
+    except RuntimeError as e:
+        raise SystemExit(str(e)) from e
 
 
 def main():
@@ -279,6 +331,14 @@ def main():
     ap.add_argument("--port", type=int, default=5000)
     ap.add_argument("--raw-dir", default=str(RAW_DIR), help="where recordings are saved")
     ap.add_argument("--bias-seconds", type=float, default=5.0)
+    g = ap.add_argument_group("phone camera (stream_data/)")
+    g.add_argument("--phone", action="store_true", help="also run the phone-camera stream and show it on the dashboard")
+    g.add_argument("--phone-model", default="null", help="null | yolo | yolo:<weights.pt> | <module>:<callable>")
+    g.add_argument("--phone-host", default="0.0.0.0", help="0.0.0.0 = reachable from the phone on the same network")
+    g.add_argument("--phone-port", type=int, default=8443)
+    g.add_argument("--phone-view-fps", type=float, default=15.0, help="frame rate of the video on the dashboard")
+    g.add_argument("--phone-no-https", action="store_true", help="plain HTTP (the phone camera then won't work)")
+    g.add_argument("--phone-new-cert", action="store_true", help="regenerate the self-signed certificate (e.g. new IP)")
     args = ap.parse_args()
 
     live = args.source == "muse"
@@ -295,13 +355,17 @@ def main():
     if cal.pending():
         hub._note("calibration placeholders: " + ", ".join(cal.pending()))
     hub._note(f"hold still for {args.bias_seconds:.0f} s, facing the start line (bias)")
+    phone = open_phone_stream(args) if args.phone else None
     hub.start()
     print(f"dashboard: http://{args.host}:{args.port}")
+    if phone is not None:
+        hub._note(f"phone camera: open {phone.url} on the phone (same Wi-Fi)")
+        print(f"phone camera: open {phone.url} on the phone (same Wi-Fi), model: {getattr(phone.model, 'name', '?')}")
     try:
-        create_app(hub).run(host=args.host, port=args.port, threaded=True, use_reloader=False)
+        create_app(hub, phone).run(host=args.host, port=args.port, threaded=True, use_reloader=False)
     finally:
         hub.stop()
-        for x in (pub, cam):
+        for x in (phone, pub, cam):
             if x is not None:
                 x.close()
 

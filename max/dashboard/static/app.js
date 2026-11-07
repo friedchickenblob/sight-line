@@ -216,5 +216,53 @@ $("btn-stop").onclick = () => post("/api/record/stop");
 $("btn-mark").onclick = () => post("/api/mark");
 $("btn-rezero").onclick = () => post("/api/rezero");
 
+// ------------------------------------------------------- phone camera (--phone)
+const phoneFeeds = new Map();             // phone session id -> <figure>
+
+function phoneFigure(id) {
+  const f = document.createElement("figure");
+  f.innerHTML = `<img alt="phone ${id} video"><figcaption><b>phone ${id}</b> <span class="st"></span>` +
+    `<span class="error" hidden> · no picture from the stream (missing Pillow?)</span><pre></pre></figcaption>`;
+  const img = f.querySelector("img");
+  img.onload = () => { f.querySelector(".error").hidden = true; };
+  img.onerror = () => { f.querySelector(".error").hidden = false; };
+  img.src = `/phone/video/${id}.mjpg`;
+  $("phone-feeds").appendChild(f);
+  return f;
+}
+
+async function pollPhone() {
+  let p;
+  try { p = await (await fetch("/api/phone", { cache: "no-store" })).json(); } catch (e) { return; }
+  $("phone-card").hidden = !p.enabled;
+  if (!p.enabled) return false;
+  $("phone-url").textContent = p.url;
+  $("phone-url").href = p.url;
+  $("phone-model").textContent = p.model ? `· model: ${p.model}` : "";
+  $("phone-error").hidden = !p.error;
+  $("phone-error").textContent = p.error || "";
+  const live = new Set();
+  for (const s of p.sessions) {
+    if (s.state === "closed" || s.state === "failed") continue;
+    live.add(s.id);
+    const f = phoneFeeds.get(s.id) || phoneFigure(s.id);
+    phoneFeeds.set(s.id, f);
+    f.querySelector(".st").textContent =
+      `· ${s.state} · ${s.frames_in} frames · model ${fmt(s.infer_s * 1000, 0)} ms · ${s.frames_dropped} dropped`;
+    f.querySelector("pre").textContent = s.latest ? JSON.stringify(s.latest) : "";
+  }
+  for (const [id, f] of phoneFeeds) {
+    if (!live.has(id)) { f.querySelector("img").src = ""; f.remove(); phoneFeeds.delete(id); }
+  }
+  $("phone-empty").hidden = phoneFeeds.size > 0;
+  return true;
+}
+
+async function phoneLoop() {
+  const enabled = await pollPhone();
+  if (enabled !== false) setTimeout(phoneLoop, 1000);   // without --phone, ask once and stop
+}
+
 connect();
 requestAnimationFrame(frame);
+phoneLoop();
