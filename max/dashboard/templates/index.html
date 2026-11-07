@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SightLine head motion</title>
+  <script src="{{ url_for('static', filename='theme.js') }}"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>SightLine · head motion</h1>
+      <div class="sub" id="source">connecting…</div>
+    </div>
+    <div class="stats">
+      <span class="pill" id="status">connecting</span>
+      <span class="stat"><b id="rate">–</b> Hz</span>
+      <span class="stat"><b id="drops">–</b> drops/min</span>
+      <span class="stat"><b id="lost">–</b> samples lost</span>
+      <span class="stat">battery <b id="battery">–</b></span>
+    </div>
+  </header>
+
+  <main>
+    <section class="card controls">
+      <div class="row">
+        <input id="rec-name" type="text" placeholder="recording name (optional, e.g. d2_worn)" autocomplete="off">
+        <button id="btn-start" class="primary">Start recording</button>
+        <button id="btn-stop" disabled>Stop recording</button>
+        <button id="btn-mark" title="Adds a MARK row, like Enter in record.py">Mark</button>
+        <button id="btn-rezero" title="Adds a RESET row: yaw back to 0 (face the start line)">Re-zero</button>
+      </div>
+      <div class="row rec-line">
+        <span id="rec-dot" class="dot"></span>
+        <span id="rec-text">not recording</span>
+        <span class="hint">Recordings start with 5 s standing still (bias).</span>
+      </div>
+      <div id="action-error" class="error" hidden></div>
+      <div id="error" class="error" hidden></div>
+    </section>
+
+    <section class="card yaw">
+      <h2>Head yaw</h2>
+      <div class="yaw-big"><span id="yaw">–</span><small>°</small></div>
+      <div class="bar"><div class="bar-zero"></div><div id="yaw-marker" class="bar-marker"></div></div>
+      <dl class="kv">
+        <dt>rate</dt><dd><span id="rate-dps">–</span> °/s</dd>
+        <dt>source</dt><dd id="yaw-source">–</dd>
+        <dt>camera age</dt><dd id="cam-age">–</dd>
+        <dt>valid</dt><dd id="valid">–</dd>
+        <dt>bias</dt><dd id="bias">–</dd>
+      </dl>
+    </section>
+
+    <section class="card fields">
+      <h2>Recorded fields <small>(latest row of each kind, as in the CSV)</small></h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>kind</th><th>t</th><th>v0</th><th>v1</th><th>v2</th><th>rows</th></tr></thead>
+          <tbody id="fields"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card chart-card">
+      <h2>Gyro <small>°/s · gx gy gz</small></h2>
+      <canvas id="chart-gyro"></canvas>
+    </section>
+    <section class="card chart-card">
+      <h2>Accelerometer <small>g · ax ay az</small></h2>
+      <canvas id="chart-acc"></canvas>
+    </section>
+    <section class="card chart-card">
+      <h2>Yaw <small>° · estimate, camera</small></h2>
+      <canvas id="chart-yaw"></canvas>
+    </section>
+
+    <section class="card log-card">
+      <h2>Events</h2>
+      <ol id="log"></ol>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

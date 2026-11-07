@@ -2,7 +2,7 @@ name: Protect main
 
 # Flags any commit that lands on main without going through a merged pull request.
 # GitHub Actions run after a push, so they can report it but can't stop it.
-# The actual block is the "Protect main" branch ruleset described in the README.
+# The actual block is the "Protect main" branch ruleset described in SETUP.md.
 on:
   push:
     branches: [main]

@@ -1,0 +1,28 @@
+{
+  "gyro_sign": 1.0,
+  "sign": 1.0,
+  "yaw_axis": 2,
+  "axis_sign": 1.0,
+  "scale": 1.0,
+  "gyro_limit_dps": 245.0,
+  "gravity_alpha": 0.02,
+  "camera_lag_s": 0.1,
+  "blend_k": 0.05,
+  "blend_ki": 0.003,
+  "nose_axis": null,
+  "rebias_max_std_dps": 0.6,
+  "status": {
+    "gyro_sign": "PLACEHOLDER - needs axis experiment nods (page 4a)",
+    "sign": "PLACEHOLDER - needs axis experiment (page 4a)",
+    "yaw_axis": "PLACEHOLDER - needs axis experiment (page 4a)",
+    "axis_sign": "PLACEHOLDER - needs axis experiment (page 4a)",
+    "scale": "PLACEHOLDER - needs tape-line accuracy test (page 6a)",
+    "gyro_limit_dps": "PLACEHOLDER - from muselsl scale factor; confirm flat tops in fast-turn test (page 6b)",
+    "gravity_alpha": "PLACEHOLDER - tune on a nod recording (page 4b)",
+    "camera_lag_s": "PLACEHOLDER - needs joint recording with Hanh (page 9b)",
+    "blend_k": "PLACEHOLDER - needs joint recording with Hanh (page 9d)",
+    "blend_ki": "PLACEHOLDER - tuned on synthetic bias creep; check on the joint recording (page 9d)",
+    "nose_axis": "PLACEHOLDER - needs axis experiment nods + tilts (page 4a)",
+    "rebias_max_std_dps": "PLACEHOLDER - set from D2 worn-still noise: analyze.py drift --save (page 5)"
+  }
+}
