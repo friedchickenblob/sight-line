@@ -6,6 +6,7 @@ import asyncio
 import json
 import threading
 import time
+from io import BytesIO
 
 import numpy as np
 from aiohttp import ClientSession
@@ -14,7 +15,7 @@ from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from av import VideoFrame
 
 from model import NullModel, load_model
-from server import LatestFrameWorker, create_app
+from server import LatestFrameWorker, create_app, render_jpeg
 
 
 class FakeCamera(VideoStreamTrack):
@@ -46,8 +47,14 @@ async def _phone(base_url: str, seconds: float = 3.0):
             status = await r.json()
         async with http.get(f"{base_url}/") as r:
             page = await r.text()
+        async with http.get(f"{base_url}/view") as r:
+            page += await r.text()
+        sid = status["sessions"][0]["id"]
+        async with http.get(f"{base_url}/video/{sid}.mjpg") as r:
+            mime = r.headers["Content-Type"]
+            first = await r.content.readuntil(b"\xff\xd9")           # end of the first JPEG
     await pc.close()
-    return got, status, page
+    return got, status, page, (mime, first)
 
 
 def test_phone_stream_reaches_the_model_and_results_come_back():
@@ -59,8 +66,12 @@ def test_phone_stream_reaches_the_model_and_results_come_back():
         finally:
             await server.close()
 
-    got, status, page = asyncio.run(run())
-    assert "SightLine" in page
+    got, status, page, (mime, first) = asyncio.run(run())
+    assert "SightLine · phone camera" in page and "SightLine · live phone video" in page
+    assert mime.startswith("multipart/x-mixed-replace")
+    jpg = first[first.index(b"\xff\xd8"):]
+    from PIL import Image
+    assert Image.open(BytesIO(jpg)).size == (640, 480)       # the phone's live video, viewable in a browser
     assert len(got) >= 5, "no model results came back over the data channel"
     m = got[-1]
     assert m["v"] == 1 and m["result"]["shape"] == [480, 640, 3]
@@ -105,3 +116,22 @@ def test_model_errors_are_reported_not_fatal():
 def test_load_model_specs():
     assert load_model("null").name == "null"
     assert callable(load_model("model:NullModel"))
+
+
+def test_render_jpeg_draws_detections():
+    from PIL import Image
+    frame = VideoFrame.from_ndarray(np.zeros((480, 640, 3), np.uint8), format="bgr24")
+    plain = Image.open(BytesIO(render_jpeg(frame, {"shape": [480, 640, 3]}))).convert("RGB")
+    boxed = Image.open(BytesIO(render_jpeg(frame, {"detections": [
+        {"label": "person", "conf": 0.9, "xyxy": [100, 100, 300, 400]}, {"bad": "entry"}]}))).convert("RGB")
+    assert plain.getpixel((100, 250))[0] < 30                   # black without detections
+    r, g, b = boxed.getpixel((100, 250))                         # on the box's left edge
+    assert r > 180 and g < 120 and b < 120
+
+
+def test_render_jpeg_scales_big_frames_and_their_boxes():
+    from PIL import Image
+    frame = VideoFrame.from_ndarray(np.zeros((1080, 1920, 3), np.uint8), format="bgr24")
+    img = Image.open(BytesIO(render_jpeg(frame, {"detections": [{"xyxy": [960, 540, 1500, 900]}]}))).convert("RGB")
+    assert img.size == (1280, 720)
+    assert img.getpixel((640, 450))[0] > 180                    # 960 x (1280/1920) = 640: box edge moved with the scale
