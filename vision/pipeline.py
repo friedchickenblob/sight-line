@@ -193,5 +193,5 @@ def scene_to_dict(res: FrameResult, head_yaw_deg: float | None) -> dict:
             text += f" {h['distance_m']:.2f}m {h['bearing_deg']:+.0f}deg"
         boxes.append(box(r.hazard.det, text))
 
-    return {"v": 1, "frame": res.frame, "calib": res.calib_status, "infer_ms": _r(res.infer_ms, 1),
+    return {"v": 1, "frame": res.frame, "calib": res.calib_status, "infer_s": _r(res.infer_ms / 1000, 4),
             "head_yaw_deg": _r(head_yaw_deg, 1), "worker": worker, "hazards": hazards, "detections": boxes}
