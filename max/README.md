@@ -9,6 +9,9 @@ when a machine is really about to reach someone. Implements the *Max research gu
 
 ## Quick start (Windows, from this `max/` folder)
 
+First time on a Windows laptop? Follow [docs/windows-setup.md](docs/windows-setup.md):
+step by step from installing Python to the live dashboard, plus common errors and fixes.
+
 ```bash
 python -m venv .venv
 .venv\Scripts\activate             # Git Bash: source .venv/Scripts/activate
@@ -118,7 +121,7 @@ headmotion/   frame, sources (BrainFlow + replay), yaw (estimator + YawPipeline)
 scripts/      record, check_stream, live_yaw, analyze, simulate_contact, make_fake_data
 dashboard/    live dashboard: Flask app (app.py), templates/index.html, static/app.js + style.css
 tests/        120 tests; each maps to a guide "check", "DONE WHEN" or review finding
-docs/         streaming recipe, head-yaw notes, contact maths, experiments tracker,
+docs/         Windows setup + troubleshooting, streaming recipe, head-yaw notes, contact maths, experiments tracker,
               agentic-coding notes (pstack)
 calibration.json  measured constants; every value is a PLACEHOLDER until its experiment runs
 decisions.tsv     decision log (pstack show-me-your-work format)
