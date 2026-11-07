@@ -1,0 +1,10 @@
+# regenerate with: python scripts/make_fake_data.py
+data/fake/
+# plots from scripts
+out/
+__pycache__/
+.pytest_cache/
+.venv/
+# real recordings are never committed (CLAUDE.md). Keep them on the team Drive;
+# they are still the replay safety net, just not in git.
+data/raw/
