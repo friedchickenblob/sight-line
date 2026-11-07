@@ -248,7 +248,14 @@ def create_app(model, view_fps: float = 15.0) -> web.Application:
                 if s.frame_seq != last and s.frame is not None:
                     last = s.frame_seq
                     result = s.latest["result"] if s.latest else None
-                    jpg = await loop.run_in_executor(None, render_jpeg, s.frame, result)
+                    try:
+                        jpg = await loop.run_in_executor(None, render_jpeg, s.frame, result)
+                    except ImportError:
+                        log.error("/view needs Pillow: run `pip install -r requirements.txt`, then reload the page")
+                        break
+                    except Exception:
+                        log.exception("could not draw frame for /view")
+                        break
                     await resp.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
                                      + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n")
                 await asyncio.sleep(gap)
@@ -341,6 +348,11 @@ def main():
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     model = load_model(args.model)
+    try:
+        import PIL  # noqa: F401  (only /view needs it)
+    except ImportError:
+        log.warning("Pillow is not installed: streaming works, but /view will stay blank. "
+                    "Run `pip install -r requirements.txt`.")
     ip = lan_ip()
     ssl_ctx = None
     if not args.no_https:
