@@ -15,7 +15,7 @@ step by step from installing Python to the live dashboard, plus common errors an
 ```bash
 python -m venv .venv
 .venv\Scripts\activate             # Git Bash: source .venv/Scripts/activate
-pip install -r requirements.txt
+pip install -r ../requirements.txt    # the repo-wide requirements file
 python -m pytest                   # 120 tests, synthetic data + BrainFlow's synthetic board, ~1-2 min
 python scripts/make_fake_data.py   # one fake recording per experiment -> data/fake/
 python scripts/live_yaw.py --source synthetic:joint      # watch fake live yaw
