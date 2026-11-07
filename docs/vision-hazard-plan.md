@@ -5,7 +5,7 @@ vehicles), track them, and report for each hazard **where it is relative to the 
 its distance, and whether and when it will reach them. Combined with the Muse head yaw, this answers
 "is a hazard closing in that the worker isn't looking at?"
 
-Branch: `max/vision-hazard-direction`. This overlaps with Zoe's area (detection and tracking) and
+Code: `vision/` (first built on the `max/vision-hazard-direction` branch). This overlaps with Zoe's area (detection and tracking) and
 Hanh's (floor mapping and ArUco), so share the plan with both.
 
 ## Status
@@ -13,14 +13,14 @@ Hanh's (floor mapping and ArUco), so share the plan with both.
 | Part | State |
 |---|---|
 | Floor frame + homography from ArUco markers (angled camera) | **Built**, tested on a simulated angled camera; not yet checked on the real floor |
-| Angle maths: bearing, distance, relative-to-head bearing, closest approach | **Built** and unit-tested |
+| Angle maths: bearing, distance, relative-to-head bearing | **Built** and unit-tested |
 | YOLO26 person + vehicle detection with ByteTrack IDs | **Built**; live webcam run tracked a person with a stable ID; RC car not yet tested |
 | Worker choice + hazard distance/angles per frame (`scene.py`) | **Built** and unit-tested |
 | Live tools: `check_floor` (calibration check), `run_vision` (detection + angles) | **Built** |
 | Phone camera input: `run_phone` runs the pipeline on Sean's WebRTC phone stream (`stream_data/`) | **Built**; live run tracked a person and found all 4 floor markers |
 | Toy car: YOLO vehicles at a lower threshold, plus an ArUco tag on the car (`--car-marker 4`) | **Built** and unit-tested; not yet run with the real toy car |
 | Hazard message (`sightline/vision/hazards` format below), streamed live at `/hazards` (SSE), optional `--mqtt` | **Built** (no velocities / CPA fields yet) |
-| Velocities, time to contact in the live app | Not yet (`hazards.assess()` exists but isn't fed velocities) |
+| Velocities, time to contact in the live app | Not yet: needs per-track velocities, which then feed `max/headmotion/contact.py` |
 | JSONL log, Muse head yaw link, evaluation | Not yet |
 
 How to run and test each piece: [vision-testing.md](vision-testing.md).
@@ -191,20 +191,15 @@ See [vision-testing.md](vision-testing.md).
      fusion: rel_bearing = bearing − Muse head yaw → "unseen + closing" → wristband buzz
 ```
 
-### Hazard geometry (constant-velocity closest point of approach)
+### Hazard geometry
 
-With `p` = hazard position − worker position and `v` = hazard velocity − worker velocity (floor frame):
+`vision/hazards.py` gives each hazard's `distance_m`, `bearing_deg = atan2(p.y, p.x)` (wrapped) and
+`rel_bearing_deg = bearing_deg − head yaw`, with `p` = hazard position − worker position (floor frame).
 
-```
-distance_m        = |p|
-bearing_deg       = atan2(p.y, p.x)                 (degrees, wrapped)
-closing_speed_mps = −(p · v) / |p|                  (> 0 = getting closer)
-t_cpa_s           = −(p · v) / |v|²                 (time of closest approach)
-cpa_m             = |p + v · t_cpa_s|               (how close it will get)
-```
-
-A hazard counts as **threatening** when `0 < t_cpa_s < horizon_s` and `cpa_m < radius_m`, or when it's
-already inside `radius_m`. Starting values to tune: horizon 3 s, radius 1 m (scaled to the RC demo).
+Time to contact is **not** computed here. `max/headmotion/contact.py` already does it (constant-velocity
+closest approach, the time the gap first reaches the radius, and hysteresis so the flag doesn't flicker),
+and publishes `sightline/contact`. Once tracking gives velocities, vision feeds that one implementation
+instead of keeping a second copy. See [max/docs/contact-maths.md](../max/docs/contact-maths.md).
 
 ---
 
@@ -214,7 +209,7 @@ already inside `radius_m`. Starting values to tune: horizon 3 s, radius 1 m (sca
 vision/
 ├── floor.py         [built]  ArUco detection, homography fit, pixel ↔ floor metres, save/load floor_calib.json,
 │                             per-marker fit error, ground_point() = bottom-centre of a box
-├── hazards.py       [built]  pure geometry: bearing, distance, relative bearing, in_view(), assess() = CPA/TTC
+├── hazards.py       [built]  pure geometry: bearing, distance, relative bearing, in_view()
 ├── detector.py      [built]  YOLO26 wrapper (stock COCO weights), person / vehicle kinds, ByteTrack track IDs,
 │                             separate vehicle threshold; Detection.ground overrides the box-bottom floor point
 ├── scene.py         [built]  per frame: pick the worker (sticky track ID), place everyone on the floor,
@@ -225,19 +220,18 @@ vision/
 ├── pipeline.py      [built]  VisionPipeline: one frame → markers (once) → floor map → YOLO → car tags → scene;
 │                             overlay drawing; scene_to_dict() = the hazard message below
 ├── run_vision.py    [built]  live app: camera or --video → pipeline, overlay + console
-├── run_phone.py     [built]  same pipeline on the phone stream (stream_data/server.py), overlay window,
+├── run_phone.py     [built]  same pipeline on the phone stream (stream_data/stream_server.py), overlay window,
 │                             /hazards SSE stream + optional MQTT (HazardHub)
-├── tracks.py        [todo]   per-track smoothed position + velocity (Kalman) → feeds hazards.assess()
+├── tracks.py        [todo]   per-track smoothed position + velocity (Kalman) → feeds max/headmotion/contact.py
 └── (JSONL log)      [todo]
-tests/
-├── test_hazards.py  bearing tables, relative bearing, head-on / passing / receding / parked CPA cases
+vision/tests/
+├── test_hazards.py  bearing tables, relative bearing, wrapping, field of view
 ├── test_floor.py    simulated angled camera: detection, calibration accuracy, head-vs-feet, rotated marker
 ├── test_scene.py    worker choice, floor placement, hazard angles; one real YOLO run on a sample photo
 └── test_phone.py    phone model messages, toy-car marker tag, tag-vs-YOLO merge, /hazards stream
 stream_data/                Sean's phone camera → WebRTC server (merged from sean/phone-camera-stream)
 floor_layout.example.json   template for the real marker layout
-requirements-vision.txt     numpy, opencv-contrib-python, ultralytics, pytest, + phone stream (aiortc, aiohttp,
-                            cryptography, pillow, pylsl) and paho-mqtt
+requirements.txt            one file for the whole repo (vision, phone stream, Muse, dashboard, phone alert)
 ```
 
 ### Data flow in `run_vision.py` (per frame)
@@ -263,7 +257,7 @@ simulated head yaw):
 
 ```json
 {
-  "v": 1, "t_s": 519300.21, "frame": 412, "calib": "live calib, all markers", "infer_ms": 38.2,
+  "v": 1, "t_s": 519300.21, "frame": 412, "calib": "live calib, all markers", "infer_s": 0.0382,
   "head_yaw_deg": 0.0,
   "worker": {"track_id": 3, "x_m": 1.02, "y_m": 0.95, "conf": 0.88},
   "hazards": [
@@ -283,11 +277,12 @@ The full target message, once tracking gives velocities:
   "worker": {"track_id": 3, "x_m": 1.42, "y_m": 0.88, "vx_mps": 0.10, "vy_mps": 0.00, "conf": 0.91},
   "hazards": [
     {"track_id": 7, "kind": "vehicle", "x_m": 2.90, "y_m": 0.70, "vx_mps": -0.60, "vy_mps": 0.05,
-     "distance_m": 1.49, "bearing_deg": -6.9, "closing_speed_mps": 0.70,
-     "t_cpa_s": 2.1, "cpa_m": 0.12, "threat": true, "conf": 0.84}
+     "distance_m": 1.49, "bearing_deg": -6.9, "conf": 0.84}
   ]
 }
 ```
+
+Time to contact for the machine goes out separately as `sightline/contact`, from `max/headmotion/contact.py`.
 
 `worker: null` when no worker is seen. Fusion treats a stale or missing vision message as **unsafe**
 (fail-safe), the same way it should treat a stale head yaw.
@@ -344,9 +339,9 @@ in scope.
 
 ## Dependencies
 
-In `requirements-vision.txt`: `numpy`, `opencv-contrib-python` (ArUco), `ultralytics` (YOLO26 +
-ByteTrack, pulls in PyTorch, CPU build by default), `pytest`. Still to add for later phases:
-`paho-mqtt` (messages), `pylsl` (project clock).
+In the repo-wide `requirements.txt`: `numpy`, `opencv-contrib-python` (ArUco), `ultralytics` (YOLO26 +
+ByteTrack, pulls in PyTorch, CPU build by default), `pytest`, `paho-mqtt` (messages), `pylsl` (project clock),
+plus the phone-stream packages (`aiortc`, `aiohttp`, `cryptography`, `pillow`).
 
 Ultralytics also installs plain `opencv-python`, which shares files with the contrib build; see
 [vision-testing.md](vision-testing.md#setup) if ArUco disappears after an install.

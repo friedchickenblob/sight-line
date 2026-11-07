@@ -1,11 +1,11 @@
 # Testing the floor mapping and hazard angles
 
-What exists so far (branch `max/vision-hazard-direction`), and how to test each piece. Not built yet:
+What exists so far in `vision/` and `stream_data/`, and how to test each piece. Not built yet:
 velocities / time to contact, MQTT output, and the Muse link; see [vision-hazard-plan.md](vision-hazard-plan.md).
 
 | File | What it does |
 |---|---|
-| `vision/hazards.py` | Angle maths: bearing, distance, relative-to-head bearing, closest approach / time to contact |
+| `vision/hazards.py` | Angle maths: bearing, distance, relative-to-head bearing (time to contact lives in `max/headmotion/contact.py`) |
 | `vision/floor.py` | Detects floor ArUco markers, fits the pixel → floor-metres homography, ground point of a box |
 | `vision/make_markers.py` | Generates printable markers |
 | `vision/check_floor.py` | Live tool: grid overlay on the camera image, click to measure positions and angles |
@@ -13,14 +13,14 @@ velocities / time to contact, MQTT output, and the Muse link; see [vision-hazard
 | `vision/scene.py` | Picks the worker, places everyone on the floor, distance / bearing / relative bearing of each vehicle |
 | `vision/run_vision.py` | Live app: detection + floor map + hazard angles on the camera feed |
 | `vision/overlay.py` | Shared drawing helpers |
-| `tests/test_hazards.py`, `tests/test_floor.py`, `tests/test_scene.py` | Unit tests, including a simulated angled camera and one real YOLO run |
+| `vision/tests/test_hazards.py`, `test_floor.py`, `test_scene.py`, `test_phone.py` | Unit tests, including a simulated angled camera and one real YOLO run |
 
 ## Setup
 
 ```powershell
 cd sight-line
 python -m venv .venv
-.venv\Scripts\pip install -r requirements-vision.txt
+.venv\Scripts\pip install -r requirements.txt
 ```
 
 Ultralytics also installs plain `opencv-python`, which shares files with `opencv-contrib-python`.
@@ -33,12 +33,12 @@ The YOLO weights (`yolo26n.pt`, ~5 MB) download automatically on first use and a
 ## Level 1: unit tests (no hardware, 1 minute)
 
 ```powershell
-.venv\Scripts\python -m pytest tests -v
+.venv\Scripts\python -m pytest vision/tests -v
 ```
 
 | Test file | Checks |
 |---|---|
-| `test_hazards.py` | Every row of the bearing tables in the plan; head-on, passing, receding, parked and walking-into-a-parked-car cases for time to contact |
+| `test_hazards.py` | Every row of the bearing tables in the plan, angle wrapping and the field of view |
 | `test_scene.py` | Fake detections seen by the simulated camera: worker floor position, distance/bearing/relative bearing, nearest-first sorting, sticky worker choice; plus YOLO on Ultralytics' sample photo (must find people and the bus) |
 | `test_floor.py` | Draws the 4 markers on a virtual floor and photographs them with a simulated webcam 1.8 m up, tilted about 36° down. Then checks markers are found, corners fit within 1 cm, any floor point maps back within 2 cm, a head-height point lands > 1 m off (why feet are used), and a rotated marker is flagged |
 
@@ -123,7 +123,6 @@ The phone is the camera: Sean's `stream_data/` server receives its video over We
 `vision.run_phone` runs the same pipeline on every frame.
 
 ```powershell
-.venv\Scripts\python -m pip install -r requirements-vision.txt     # adds aiortc, aiohttp, cryptography, pillow, pylsl
 .venv\Scripts\python -m vision.run_phone --layout floor_layout.json --car-marker 4
 ```
 
