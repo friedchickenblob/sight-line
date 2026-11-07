@@ -11,12 +11,12 @@ and are printed in the terminal.
    ```powershell
    python -m venv .venv
    .venv\Scripts\Activate.ps1          # cmd: .venv\Scripts\activate.bat
-   pip install -r requirements.txt
+   pip install -r ../requirements.txt   # the repo-wide requirements file
    ```
 3. Start the server:
    ```powershell
-   python server.py                    # placeholder model: reports frame size + brightness
-   python server.py --model yolo       # object detection (first: pip install ultralytics)
+   python stream_server.py                    # placeholder model: reports frame size + brightness
+   python stream_server.py --model yolo       # object detection
    ```
    It prints the link, e.g. `https://192.168.1.23:8443`.
 4. On the phone, open that link in **Chrome**. It warns *"Your connection is not
@@ -39,7 +39,7 @@ boxes and labels are drawn on the video. Other devices on the network can open
 The phone's own preview is on its page, but `/view` shows what the **server** received,
 so it's the one to check when debugging the model.
 
-Check it without a phone: `python -m pytest test_server.py` (a Python WebRTC client
+Check it without a phone: `python -m pytest test_stream_server.py` (a Python WebRTC client
 plays the phone).
 
 ## Plug in your model
@@ -47,7 +47,7 @@ plays the phone).
 Edit [model.py](model.py), or point `--model` at your own code:
 
 ```powershell
-python server.py --model my_detector:Detector    # my_detector.py in this folder
+python stream_server.py --model my_detector:Detector    # my_detector.py in this folder
 ```
 
 A model is any callable `model(img, t_s) -> dict`:

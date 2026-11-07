@@ -1,6 +1,6 @@
 """End to end without a phone: an aiortc client plays the phone's part.
 
-    python -m pytest test_server.py
+    python -m pytest test_stream_server.py
 """
 import asyncio
 import json
@@ -15,7 +15,7 @@ from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from av import VideoFrame
 
 from model import NullModel, load_model
-from server import LatestFrameWorker, create_app, render_jpeg
+from stream_server import LatestFrameWorker, create_app, render_jpeg
 
 
 class FakeCamera(VideoStreamTrack):

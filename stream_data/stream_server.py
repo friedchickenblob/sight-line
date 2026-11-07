@@ -1,7 +1,7 @@
 """Phone camera -> WebRTC -> computer vision model.
 
-    python server.py                    # https://<this-computer's-IP>:8443, open it in Chrome on the phone
-    python server.py --model yolo       # run YOLO on the frames (pip install ultralytics)
+    python stream_server.py                    # https://<this-computer's-IP>:8443, open it in Chrome on the phone
+    python stream_server.py --model yolo       # run YOLO on the frames (pip install ultralytics)
 
 Watch the live video on the computer at https://localhost:8443/view (every phone,
 with the model's boxes drawn on top when it returns "detections").
@@ -94,7 +94,7 @@ class LatestFrameWorker:
                 log.exception("model failed")
             self.last_infer_ms = (time.perf_counter() - t0) * 1000
             self.frames_done += 1
-            self.on_result({"v": 1, "t_s": t_s, "latency_s": clock() - t_s, "infer_ms": self.last_infer_ms,
+            self.on_result({"v": 1, "t_s": t_s, "latency_s": clock() - t_s, "infer_s": self.last_infer_ms / 1000,
                             "width": img.shape[1], "height": img.shape[0], "frames_in": self.frames_in,
                             "frames_dropped": self.frames_dropped, "result": out})
 
@@ -149,9 +149,9 @@ class Session:
 
     def status(self) -> dict:
         w = self.worker
-        return dict(id=self.id, state=self.pc.connectionState, seconds=round(clock() - self.started, 1),
+        return dict(id=self.id, state=self.pc.connectionState, elapsed_s=round(clock() - self.started, 1),
                     frames_in=w.frames_in, frames_done=w.frames_done, frames_dropped=w.frames_dropped,
-                    infer_ms=round(w.last_infer_ms, 1),
+                    infer_s=round(w.last_infer_ms / 1000, 4),
                     latest=None if self.latest is None else self.latest["result"])
 
 
@@ -251,7 +251,7 @@ def create_app(model, view_fps: float = 15.0) -> web.Application:
                     try:
                         jpg = await loop.run_in_executor(None, render_jpeg, s.frame, result)
                     except ImportError:
-                        log.error("/view needs Pillow: run `pip install -r requirements.txt`, then reload the page")
+                        log.error("/view needs Pillow: run `pip install -r requirements.txt` from the repo root, then reload the page")
                         break
                     except Exception:
                         log.exception("could not draw frame for /view")
@@ -352,7 +352,7 @@ def main():
         import PIL  # noqa: F401  (only /view needs it)
     except ImportError:
         log.warning("Pillow is not installed: streaming works, but /view will stay blank. "
-                    "Run `pip install -r requirements.txt`.")
+                    "Run `pip install -r requirements.txt` from the repo root.")
     ip = lan_ip()
     ssl_ctx = None
     if not args.no_https:

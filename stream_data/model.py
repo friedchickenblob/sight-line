@@ -9,7 +9,7 @@ A model is any callable:
               A "detections" list of {"label", "conf", "xyxy": [x0, y0, x1, y1]} (pixels)
               is also drawn on the /view video.
 
-Plug in your own with `python server.py --model my_module:MyModel`: a class (built
+Plug in your own with `python stream_server.py --model my_module:MyModel`: a class (built
 with no arguments) or a ready-made callable, importable from this folder. It runs in a worker
 thread, one frame at a time, so it may block.
 """

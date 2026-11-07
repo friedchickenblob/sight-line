@@ -1,4 +1,4 @@
-// Phone side: camera -> WebRTC -> server.py. Results come back on a data channel.
+// Phone side: camera -> WebRTC -> stream_server.py. Results come back on a data channel.
 "use strict";
 
 const $ = (id) => document.getElementById(id);
@@ -89,7 +89,7 @@ async function stop() {
 
 function onResult(m) {
   results++;
-  $("latency").textContent = `${(m.latency_s * 1000).toFixed(0)} ms (model ${m.infer_ms.toFixed(0)} ms)`;
+  $("latency").textContent = `${(m.latency_s * 1000).toFixed(0)} ms (model ${(m.infer_s * 1000).toFixed(0)} ms)`;
   $("dropped").textContent = `${m.frames_dropped} of ${m.frames_in} frames`;
   $("result").textContent = JSON.stringify(m.result, null, 1);
 }
