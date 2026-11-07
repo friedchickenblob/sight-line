@@ -27,6 +27,18 @@ and are printed in the terminal.
    `phone 1: 30 fps in, 30 fps model (12 ms), 0 dropped, latest {...}`.
    `https://localhost:8443/status` shows the same as JSON. Stop with **Ctrl+C**.
 
+## Watch the live video on the computer
+
+While the phone streams, open **<https://localhost:8443/view>** in a browser on the
+computer (accept the same certificate warning). It shows every connected phone's live
+video (up to 15 fps; change with `--view-fps 30`) with fps, model time and the latest
+result underneath. If the model returns `detections` (as `--model yolo` does), their
+boxes and labels are drawn on the video. Other devices on the network can open
+`https://<computer's IP>:8443/view` too.
+
+The phone's own preview is on its page, but `/view` shows what the **server** received,
+so it's the one to check when debugging the model.
+
 Check it without a phone: `python -m pytest test_server.py` (a Python WebRTC client
 plays the phone).
 

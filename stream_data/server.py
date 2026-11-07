@@ -3,6 +3,9 @@
     python server.py                    # https://<this-computer's-IP>:8443, open it in Chrome on the phone
     python server.py --model yolo       # run YOLO on the frames (pip install ultralytics)
 
+Watch the live video on the computer at https://localhost:8443/view (every phone,
+with the model's boxes drawn on top when it returns "detections").
+
 The phone page (static/index.html) sends its camera as a WebRTC video track. Every
 frame that arrives is stamped with pylsl.local_clock() (the team's shared clock)
 and handed to the model in a worker thread. The worker always takes the NEWEST
@@ -24,6 +27,7 @@ import socket
 import ssl
 import threading
 import time
+from io import BytesIO
 from pathlib import Path
 
 from aiohttp import web
@@ -35,6 +39,7 @@ HERE = Path(__file__).resolve().parent
 log = logging.getLogger("stream")
 MODEL = web.AppKey("model", object)
 SESSIONS = web.AppKey("sessions", set)
+VIEW_FPS = web.AppKey("view_fps", float)
 
 try:
     from pylsl import local_clock as clock          # shared clock (CLAUDE.md), so frames line up with the Muse
@@ -115,6 +120,8 @@ class Session:
         self.worker = LatestFrameWorker(model, self._result)
         self.started = clock()
         self.closed = False
+        self.frame = None                              # newest frame, for the /view video
+        self.frame_seq = 0
 
     def _result(self, msg: dict):                     # called from the worker thread
         self.latest = msg
@@ -128,6 +135,7 @@ class Session:
         try:
             while True:
                 frame = await track.recv()
+                self.frame, self.frame_seq = frame, self.frame_seq + 1
                 self.worker.submit(frame, clock())
         except Exception:                             # MediaStreamError when the phone stops
             pass
@@ -147,11 +155,47 @@ class Session:
                     latest=None if self.latest is None else self.latest["result"])
 
 
+# ----------------------------------------------------------------- viewer
+VIEW_MAX_WIDTH = 1280
+
+
+def render_jpeg(frame, result: dict | None, quality: int = 80) -> bytes:
+    """One frame as JPEG for the /view page, with the model's detections drawn on it.
+
+    Boxes come from the newest model result, which may be a frame or two older
+    than the picture when the model is slower than the camera."""
+    from PIL import ImageDraw
+
+    img = frame.to_image()                            # PIL RGB
+    scale = 1.0
+    if img.width > VIEW_MAX_WIDTH:
+        scale = VIEW_MAX_WIDTH / img.width
+        img = img.resize((VIEW_MAX_WIDTH, round(img.height * scale)))
+    dets = (result or {}).get("detections") if isinstance(result, dict) else None
+    if dets:
+        draw = ImageDraw.Draw(img)
+        for d in dets:
+            try:
+                x0, y0, x1, y1 = (float(v) * scale for v in d["xyxy"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            draw.rectangle((x0, y0, x1, y1), outline=(255, 64, 64), width=3)
+            label = f"{d.get('label', '')} {d.get('conf', '')}".strip()
+            if label:
+                tw = draw.textlength(label)
+                draw.rectangle((x0, max(y0 - 14, 0), x0 + tw + 6, max(y0, 14)), fill=(255, 64, 64))
+                draw.text((x0 + 3, max(y0 - 13, 1)), label, fill=(255, 255, 255))
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=quality)
+    return buf.getvalue()
+
+
 # ------------------------------------------------------------------------- app
-def create_app(model) -> web.Application:
+def create_app(model, view_fps: float = 15.0) -> web.Application:
     app = web.Application()
     app[MODEL] = model
     app[SESSIONS] = set()
+    app[VIEW_FPS] = view_fps
 
     async def index(request):
         return web.FileResponse(HERE / "static" / "index.html")
@@ -186,6 +230,32 @@ def create_app(model) -> web.Application:
         return web.json_response({"model": getattr(request.app[MODEL], "name", "custom"),
                                   "sessions": [s.status() for s in request.app[SESSIONS]]})
 
+    async def view(request):
+        return web.FileResponse(HERE / "static" / "view.html")
+
+    async def video(request):
+        """MJPEG: the phone's newest frame, again and again, for an <img> tag."""
+        sid = int(request.match_info["id"])
+        s = next((x for x in request.app[SESSIONS] if x.id == sid), None)
+        if s is None:
+            raise web.HTTPNotFound(text=f"no phone {sid}")
+        resp = web.StreamResponse(headers={"Content-Type": "multipart/x-mixed-replace; boundary=frame",
+                                           "Cache-Control": "no-cache"})
+        await resp.prepare(request)
+        loop, last, gap = asyncio.get_running_loop(), 0, 1.0 / request.app[VIEW_FPS]
+        try:
+            while not s.closed:
+                if s.frame_seq != last and s.frame is not None:
+                    last = s.frame_seq
+                    result = s.latest["result"] if s.latest else None
+                    jpg = await loop.run_in_executor(None, render_jpeg, s.frame, result)
+                    await resp.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                                     + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n")
+                await asyncio.sleep(gap)
+        except (ConnectionResetError, asyncio.CancelledError):
+            pass                                       # the viewer closed the page
+        return resp
+
     async def on_shutdown(app):
         await asyncio.gather(*(s.close() for s in list(app[SESSIONS])))
         app[SESSIONS].clear()
@@ -210,6 +280,8 @@ def create_app(model) -> web.Application:
     app.router.add_get("/", index)
     app.router.add_post("/offer", offer)
     app.router.add_get("/status", status)
+    app.router.add_get("/view", view)
+    app.router.add_get(r"/video/{id:\d+}.mjpg", video)
     app.router.add_static("/static/", HERE / "static")
     app.on_shutdown.append(on_shutdown)
     app.cleanup_ctx.append(report)
@@ -258,6 +330,7 @@ def main():
     ap.add_argument("--host", default="0.0.0.0", help="0.0.0.0 = reachable from the phone on the same network")
     ap.add_argument("--port", type=int, default=8443)
     ap.add_argument("--model", default="null", help="null | yolo | yolo:<weights.pt> | <module>:<callable>")
+    ap.add_argument("--view-fps", type=float, default=15.0, help="frame rate of the /view video on the computer")
     ap.add_argument("--no-https", action="store_true", help="plain HTTP (camera only works on http://localhost)")
     ap.add_argument("--new-cert", action="store_true", help="regenerate cert.pem / key.pem (e.g. new IP)")
     ap.add_argument("--verbose", action="store_true")
@@ -278,8 +351,9 @@ def main():
     scheme = "http" if args.no_https else "https"
     print(f"\nmodel: {getattr(model, 'name', args.model)}")
     print(f"open on the phone (same Wi-Fi):  {scheme}://{ip}:{args.port}")
+    print(f"watch the video on this computer: {scheme}://localhost:{args.port}/view")
     print(f"status:                          {scheme}://localhost:{args.port}/status\n")
-    web.run_app(create_app(model), host=args.host, port=args.port, ssl_context=ssl_ctx, print=None)
+    web.run_app(create_app(model, args.view_fps), host=args.host, port=args.port, ssl_context=ssl_ctx, print=None)
 
 
 if __name__ == "__main__":
