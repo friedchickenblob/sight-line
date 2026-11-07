@@ -25,7 +25,9 @@ re-record A, C and D. Clips B and G don't need the truck, so they can be final n
 
 - [ ] The phone, ideally **the same phone Hanh used**, mounted in the same place, so Hanh's floor map fits your clips too
 - [ ] A way to mount the phone **high and pointing straight down**: a tripod with a boom arm, a shelf, or taped to the ceiling. Higher is better.
-- [ ] The toy truck. If it's not remote-controlled, a **string about 3 m long** to pull it from outside the rig
+- [ ] The toy truck, **at least 15–20 cm long** (bigger is easier to detect from high up)
+- [ ] A **thin, dark string about 4 m long**, tied low on the front of the truck. A second string on the back lets you
+      pull it back without touching it. (If you have a remote-control truck, use that instead and skip the strings.)
 - [ ] Floor markers **0, 1, 2, 3** (from Hanh), marker **20** on the truck's roof, marker **10** on the hardhat
 - [ ] Masking tape and a tape measure
 - [ ] A helper (the "worker" or the truck driver), a cardboard box, a backpack or bag, a lamp
@@ -92,6 +94,8 @@ General rules:
 - Stop and start a new video for each clip. Write down the phone's file name (e.g. `IMG_1234`) next to the clip letter
   in the log right away.
 - Keep the truck driver's hands and body **out of the picture**: stand outside the rig and pull the string, or drive by remote.
+- **Pulling with a string:** pull slowly and steadily, low and level with the floor, so the truck doesn't tip or jerk.
+  To change direction, walk around the outside of the rig and pull from the new side.
 - Wait **3 seconds without moving** at the start and end of each clip, and between runs.
 - If a take goes wrong, record it again and write "take 2" in the log.
 
@@ -101,7 +105,9 @@ General rules:
 1. Truck parked at **P**, nobody in the picture: **10 s still**.
 2. **Timed 2 m run:** put the truck before line L1, then drive it in a straight line along y = 1.0 at a steady speed across
    L1 and L2, all the way through.
-3. Loops, stops and turns: drive into **all four corners** and along all four edges of the rig.
+3. Move the truck through **all four corners** and along **all four edges**, plus both diagonals. With a string, pull from a
+   different side each time so the truck **faces every direction** at some point (+x, −x, +y, −y, and diagonals).
+   Stop for 2 s in each corner. With a remote, add loops and turns.
 4. Park in one corner: **10 s still**.
 
 ### Clip B: worker alone, no truck (~60 s)
@@ -118,13 +124,24 @@ General rules:
 **What it tests:** detecting both at once, in the normal demo scene.
 
 1. Worker stands at **W**, hardhat on, and stays roughly in place, turning their head now and then.
-2. The truck drives past the worker at about **1.5 m**, then **1 m**, then **0.5 m** away, both directions each time.
-3. Finish with the truck circling the worker once at about 1 m.
+2. The truck passes the worker in straight lines along y (across the rig), the puller standing outside the rig at the
+   +y or −y edge. Each line is pulled once in each direction:
+
+   | Pass | Line | Distance from W |
+   |---|---|---|
+   | 1–2 | x = 0.5 | 1.5 m |
+   | 3–4 | x = 1.0 | 1.0 m |
+   | 5–6 | x = 1.5 | 0.5 m |
+
+3. With a remote, finish with the truck circling the worker once at about 1 m. With a string, skip this.
 
 ### Clip D: truck straight at the worker, 5 runs (~90 s)
 **What it tests:** the scene the alert is made for. Afterwards we check the velocity points at the worker (within 15°).
 
 In every run the worker stands at **W**. **The truck stops about 30 cm before the worker's feet.** Don't hit anyone.
+
+With a string: the puller stands outside the rig **beyond the worker**, on the line from the start spot through W, and
+the worker stands with the string **between their feet**. Then the truck heads straight at the worker.
 
 | Run | Start | Worker faces | Speed |
 |---|---|---|---|
