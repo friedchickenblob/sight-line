@@ -68,6 +68,34 @@ Neither hotspot needs internet. The app deliberately sends its traffic over the 
 because Android otherwise switches to mobile data when the Wi-Fi has no internet and then cannot
 reach the laptop.
 
+## Dashboard tab
+
+The page at `http://localhost:8765/` has two tabs at the top: **Notifications** (send form, connected phones) and
+**Dashboard** (the live head-motion dashboard from `max/dashboard/`, with its recording controls). A green dot next
+to "Dashboard" means it is running. The tab you chose is kept when you reload.
+
+The dashboard stays its own program on port 5000 and the tab shows it in a frame. To have this server start it
+for you:
+
+```bash
+python server.py --dashboard                                   # real Muse
+python server.py --dashboard --dashboard-args="--board synthetic"   # no headband: BrainFlow's fake board
+```
+
+Notes:
+
+- **Light / dark:** the sun/moon button at the top right switches both tabs, and the dashboard in its frame follows.
+  The first visit uses your system setting; after that your choice is remembered in this browser. (The dashboard got a
+  small `static/theme.js` and `data-theme` overrides in `style.css` so the page can set its theme. It still follows the
+  system setting when opened on its own.)
+- The `max/dashboard/` code lives on the `sean/live-dashboard` branch until that is merged. Without it the tab says
+  "Dashboard code not found". `--dashboard-script <path to app.py>` points to a copy elsewhere.
+- Run the server with the `max/` virtual environment's Python (it has BrainFlow and Flask), because that Python starts the dashboard.
+- Use the `=` form for `--dashboard-args`, and quote it in PowerShell.
+- The dashboard only accepts connections from the laptop, so open the page at `localhost` on the laptop. It can start and
+  stop recordings, so `--dashboard-lan` (open it from other devices) is for a network you trust only.
+- If you start the dashboard yourself (`python max/dashboard/app.py`), the tab finds it on port 5000 too.
+
 ## Sending alerts
 
 ```bash

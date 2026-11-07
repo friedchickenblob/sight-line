@@ -1,4 +1,4 @@
-"""Tests: run the real server on a free port and read /events like the phone does."""
+﻿"""Tests: run the real server on a free port and read /events like the phone does."""
 import json
 import socket
 import threading
@@ -21,10 +21,10 @@ def free_port():
 
 
 class Running:
-    def __init__(self, token=None):
+    def __init__(self, token=None, dashboard=None):
         self.port = free_port()
         self.hub = srv.Hub()
-        self.app = srv.create_app(self.hub, token, self.port)
+        self.app = srv.create_app(self.hub, token, self.port, dashboard)
         self.httpd = make_server("127.0.0.1", self.port, self.app, threaded=True)
         self.t = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.t.start()
@@ -182,3 +182,116 @@ def test_state_lists_phone_and_recent(s):
     d = json.load(urllib.request.urlopen(s.base + "/api/state"))
     assert d["clients"][0]["name"] == "pixel" and d["recent"][0]["title"] == "hi"
     resp.close()
+
+
+# ---- dashboard tab -------------------------------------------------------------------------------------
+
+FAKE_DASHBOARD = """
+import argparse, socket, time
+ap = argparse.ArgumentParser()
+ap.add_argument("--host"); ap.add_argument("--port", type=int); ap.add_argument("--board", default="")
+a = ap.parse_args()
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind((a.host, a.port)); s.listen(5)
+print("fake dashboard listening on", a.port, flush=True)
+time.sleep(60)
+"""
+
+
+def fake_dashboard(tmp_path, body=FAKE_DASHBOARD):
+    d = tmp_path / "max" / "dashboard"
+    d.mkdir(parents=True)
+    (d / "app.py").write_text(body)
+    return d / "app.py"
+
+
+def wait_for(pred, timeout=6):
+    end = time.time() + timeout
+    while time.time() < end:
+        if pred():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_page_has_both_tabs(s):
+    html = urllib.request.urlopen(s.base + "/").read().decode()
+    assert 'id="tab-notify"' in html and 'id="tab-dash"' in html and "/api/dashboard" in html
+
+
+def test_dashboard_missing_script_reported(s, tmp_path):
+    link = srv.DashboardLink(port=free_port(), script=tmp_path / "nope" / "app.py")
+    st = link.status()
+    assert not st["script_found"] and not st["reachable"] and not st["managed"] and st["exit_code"] is None
+    with pytest.raises(FileNotFoundError):
+        link.start()
+
+
+def test_api_dashboard_endpoint(tmp_path):
+    link = srv.DashboardLink(port=free_port(), script=tmp_path / "nope" / "app.py")
+    r = Running(dashboard=link)
+    try:
+        d = json.load(urllib.request.urlopen(r.base + "/api/dashboard"))
+        assert d["port"] == link.port and d["reachable"] is False and d["script_found"] is False
+    finally:
+        r.close()
+
+
+def test_dashboard_reachable_when_something_listens():
+    srv_sock = socket.socket()
+    srv_sock.bind(("127.0.0.1", 0))
+    srv_sock.listen(1)
+    try:
+        link = srv.DashboardLink(port=srv_sock.getsockname()[1])
+        assert link.status()["reachable"] is True
+    finally:
+        srv_sock.close()
+
+
+def test_dashboard_started_and_stopped(tmp_path):
+    port = free_port()
+    link = srv.DashboardLink(port=port, script=fake_dashboard(tmp_path), extra_args=["--board", "synthetic"])
+    link.start()
+    try:
+        assert wait_for(lambda: link.status()["reachable"])
+        st = link.status()
+        assert st["managed"] and st["exit_code"] is None
+        assert wait_for(lambda: any("listening" in line for line in link.log))
+        assert "127.0.0.1" in link.command() and "--port" in link.command() and "synthetic" in link.command()
+    finally:
+        link.stop()
+    assert link.status()["exit_code"] is not None and not link.reachable()
+
+
+def test_dashboard_crash_shows_exit_code_and_output(tmp_path):
+    link = srv.DashboardLink(port=free_port(), script=fake_dashboard(tmp_path, 'print("boom: no Muse found")\nraise SystemExit(3)\n'))
+    link.start()
+    assert wait_for(lambda: link.status()["exit_code"] == 3)
+    assert wait_for(lambda: any("boom" in line for line in link.log))
+    assert link.status()["reachable"] is False
+
+
+def test_dashboard_lan_flag_changes_bind_address(tmp_path):
+    assert "0.0.0.0" in srv.DashboardLink(script=tmp_path / "a.py", lan=True).command()
+    assert "127.0.0.1" in srv.DashboardLink(script=tmp_path / "a.py").command()
+
+
+# ---- light / dark toggle -------------------------------------------------------------------------------
+
+def test_page_has_theme_toggle_and_saves_choice(s):
+    html = urllib.request.urlopen(s.base + "/").read().decode()
+    assert 'id="theme"' in html and "sightline-theme" in html          # button + saved choice
+    assert "prefers-color-scheme: dark" in html                         # default follows the system
+    assert "data-theme=dark" in html                                    # dark palette exists
+    assert "sightline-theme', value" in html                            # theme is sent to the dashboard frame
+
+
+def test_dashboard_listens_for_theme_changes():
+    from pathlib import Path
+    dash = srv.DashboardLink.DEFAULT_SCRIPT.parent
+    js = (dash / "static" / "theme.js").read_text(encoding="utf-8")
+    css = (dash / "static" / "style.css").read_text(encoding="utf-8")
+    html = (dash / "templates" / "index.html").read_text(encoding="utf-8")
+    assert "sightline-theme" in js and "window.parent" in js
+    assert '[data-theme="dark"]' in css and '[data-theme="light"]' in css
+    assert "theme.js" in html
