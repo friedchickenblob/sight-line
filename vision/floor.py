@@ -89,12 +89,15 @@ class FloorMap:
         return cls(np.array(d["H"], float), {int(k): v for k, v in d.get("errors_m", {}).items()})
 
 
-def calibrate(image: np.ndarray, layout: FloorLayout) -> tuple[FloorMap, list[int]]:
+def calibrate(image: np.ndarray | None, layout: FloorLayout,
+              found: dict[int, np.ndarray] | None = None) -> tuple[FloorMap, list[int]]:
     """Detect the layout's markers in an image and fit the floor map.
 
+    Pass `found` (from detect_markers) to reuse a detection instead of searching the image again.
     Returns the map (with per-marker corner error in metres) and the ids that were missing.
     """
-    found = detect_markers(image, layout.dictionary)
+    if found is None:
+        found = detect_markers(image, layout.dictionary)
     used = [i for i in layout.markers if i in found]
     missing = [i for i in layout.markers if i not in found]
     if len(used) < 2:   # 2 markers = 8 corners: enough points, but use all 4 for a reliable fit

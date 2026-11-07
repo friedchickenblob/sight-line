@@ -17,8 +17,11 @@ Hanh's (floor mapping and ArUco), so share the plan with both.
 | YOLO26 person + vehicle detection with ByteTrack IDs | **Built**; live webcam run tracked a person with a stable ID; RC car not yet tested |
 | Worker choice + hazard distance/angles per frame (`scene.py`) | **Built** and unit-tested |
 | Live tools: `check_floor` (calibration check), `run_vision` (detection + angles) | **Built** |
+| Phone camera input: `run_phone` runs the pipeline on Sean's WebRTC phone stream (`stream_data/`) | **Built**; live run tracked a person and found all 4 floor markers |
+| Toy car: YOLO vehicles at a lower threshold, plus an ArUco tag on the car (`--car-marker 4`) | **Built** and unit-tested; not yet run with the real toy car |
+| Hazard message (`sightline/vision/hazards` format below), streamed live at `/hazards` (SSE), optional `--mqtt` | **Built** (no velocities / CPA fields yet) |
 | Velocities, time to contact in the live app | Not yet (`hazards.assess()` exists but isn't fed velocities) |
-| MQTT output + JSONL log, Muse head yaw link, evaluation | Not yet |
+| JSONL log, Muse head yaw link, evaluation | Not yet |
 
 How to run and test each piece: [vision-testing.md](vision-testing.md).
 
@@ -212,21 +215,29 @@ vision/
 ├── floor.py         [built]  ArUco detection, homography fit, pixel ↔ floor metres, save/load floor_calib.json,
 │                             per-marker fit error, ground_point() = bottom-centre of a box
 ├── hazards.py       [built]  pure geometry: bearing, distance, relative bearing, in_view(), assess() = CPA/TTC
-├── detector.py      [built]  YOLO26 wrapper (stock COCO weights), person / vehicle kinds, ByteTrack track IDs
+├── detector.py      [built]  YOLO26 wrapper (stock COCO weights), person / vehicle kinds, ByteTrack track IDs,
+│                             separate vehicle threshold; Detection.ground overrides the box-bottom floor point
 ├── scene.py         [built]  per frame: pick the worker (sticky track ID), place everyone on the floor,
 │                             distance + bearing + relative bearing of each vehicle, nearest first
 ├── overlay.py       [built]  shared drawing: labels, floor grid, axes, head arrow
 ├── make_markers.py  [built]  printable ArUco markers
 ├── check_floor.py   [built]  live calibration check: grid overlay, click to measure positions / angles
-├── run_vision.py    [built]  live app: camera or --video → detect → floor → hazard angles, overlay + console
+├── pipeline.py      [built]  VisionPipeline: one frame → markers (once) → floor map → YOLO → car tags → scene;
+│                             overlay drawing; scene_to_dict() = the hazard message below
+├── run_vision.py    [built]  live app: camera or --video → pipeline, overlay + console
+├── run_phone.py     [built]  same pipeline on the phone stream (stream_data/server.py), overlay window,
+│                             /hazards SSE stream + optional MQTT (HazardHub)
 ├── tracks.py        [todo]   per-track smoothed position + velocity (Kalman) → feeds hazards.assess()
-└── messages.py      [todo]   MQTT payload below (v: 1, snake_case + unit suffixes) + JSONL log
+└── (JSONL log)      [todo]
 tests/
 ├── test_hazards.py  bearing tables, relative bearing, head-on / passing / receding / parked CPA cases
 ├── test_floor.py    simulated angled camera: detection, calibration accuracy, head-vs-feet, rotated marker
-└── test_scene.py    worker choice, floor placement, hazard angles; one real YOLO run on a sample photo
+├── test_scene.py    worker choice, floor placement, hazard angles; one real YOLO run on a sample photo
+└── test_phone.py    phone model messages, toy-car marker tag, tag-vs-YOLO merge, /hazards stream
+stream_data/                Sean's phone camera → WebRTC server (merged from sean/phone-camera-stream)
 floor_layout.example.json   template for the real marker layout
-requirements-vision.txt     numpy, opencv-contrib-python, ultralytics, pytest
+requirements-vision.txt     numpy, opencv-contrib-python, ultralytics, pytest, + phone stream (aiortc, aiohttp,
+                            cryptography, pillow, pylsl) and paho-mqtt
 ```
 
 ### Data flow in `run_vision.py` (per frame)
@@ -246,7 +257,23 @@ without hardware. They're also good `claude-ok` tasks to extend.
 
 ### Output message (draft, agree with Jordan's message contract)
 
-Topic `sightline/vision/hazards`, one message per processed frame:
+Topic `sightline/vision/hazards`, one message per processed frame. **What `run_phone` sends today**
+(no velocities yet; `x_m`/`y_m`/angles are `null` without a floor map, `rel_bearing_deg` uses the
+simulated head yaw):
+
+```json
+{
+  "v": 1, "t_s": 519300.21, "frame": 412, "calib": "live calib, all markers", "infer_ms": 38.2,
+  "head_yaw_deg": 0.0,
+  "worker": {"track_id": 3, "x_m": 1.02, "y_m": 0.95, "conf": 0.88},
+  "hazards": [
+    {"track_id": 4, "kind": "vehicle", "label": "toy car", "source": "marker", "conf": 1.0,
+     "x_m": 2.5, "y_m": 0.5, "distance_m": 1.55, "bearing_deg": -17.0, "rel_bearing_deg": -17.0}
+  ]
+}
+```
+
+The full target message, once tracking gives velocities:
 
 ```json
 {

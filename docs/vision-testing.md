@@ -117,6 +117,41 @@ distorting the image. That needs a one-time checkerboard lens calibration, which
 Console prints a one-line summary every second (`--print-every`). Only the COCO classes in
 `--vehicles` count as hazards (default: bicycle, bus, car, motorcycle, train, truck).
 
+## Level 2c: phone camera + toy car
+
+The phone is the camera: Sean's `stream_data/` server receives its video over WebRTC and
+`vision.run_phone` runs the same pipeline on every frame.
+
+```powershell
+.venv\Scripts\python -m pip install -r requirements-vision.txt     # adds aiortc, aiohttp, cryptography, pillow, pylsl
+.venv\Scripts\python -m vision.run_phone --layout floor_layout.json --car-marker 4
+```
+
+1. Phone and laptop on the **same Wi-Fi**. Campus networks often block device-to-device traffic:
+   use the phone's hotspot instead.
+2. Open the printed `https://<laptop IP>:8443` in **Chrome** on the phone, tap **Advanced → Proceed**
+   (self-signed certificate), then **Start streaming** and allow the camera.
+3. The laptop opens a **SightLine phone** window with the overlay (same colours as Level 2b).
+   Keys: `a` / `d` head yaw, `f` freeze calibration, `s` save it. `q` hides the window until restart.
+
+| Where | What |
+|---|---|
+| `https://localhost:8443/hazards` | **live angle stream** (Server-Sent Events): one JSON message per frame, see the message in [vision-hazard-plan.md](vision-hazard-plan.md#output-message-draft-agree-with-jordans-message-contract) |
+| phone page | the same message, over the WebRTC data channel |
+| terminal | one-line summary per second: worker position, each vehicle's distance, bearing, relative bearing |
+| `https://localhost:8443/view` | raw phone video with boxes (no floor grid) |
+| `--mqtt HOST` | also publish on `sightline/vision/hazards` (needs a broker, e.g. Mosquitto) |
+
+**Toy car.** Stock YOLO often misses toy cars, especially from above. Two ways in, both on at once:
+- YOLO's vehicle classes, with their own threshold `--vehicle-conf` (default 0.25; lower also needs `--no-track`,
+  because ByteTrack only starts tracks above about 0.25).
+- **A marker tag on the car (recommended):** print an ID that isn't a floor marker
+  (`python -m vision.make_markers --ids 4`), about 5-8 cm, keep the white border, tape it flat on the roof,
+  and run with `--car-marker 4`. The tag's centre is the car's floor position (a few cm off because the
+  roof is above the floor). A YOLO vehicle box around the tag is replaced by the tag.
+
+**If the laptop's IP changes** (new Wi-Fi), restart with `--new-cert` and open the new address on the phone.
+
 ## Level 3: with the Muse (later)
 
 Once fusion exists: tare the Muse while facing +x (toward marker 1), then compare the live head yaw
