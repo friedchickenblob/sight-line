@@ -23,4 +23,20 @@ Stand-alone scripts for the overhead camera, using ArUco markers (DICT_4X4_50). 
 
 ## Results so far
 
-Floor check on a 1.5 × 0.8 m floor, camera on the ceiling 2.5 m up: all 5 markers found in 20/20 frames, held-out error 2.5 cm median and 2.6 cm worst (target ≤ 10 cm), jitter 0 mm. Hardhat yaw accuracy is not measured yet.
+Rig: 1.5 × 0.8 m floor, camera on the ceiling 2.5 m up, looking straight down, 1280×720.
+
+**Floor mapping** (`floor_check.py`): all 5 markers found in 20/20 frames, held-out marker 4 off by 2.5 cm median and 2.6 cm worst (target ≤ 10 cm), jitter 0 mm. PASS.
+
+**Hardhat yaw** (`head.py`, marker 10 on a worn hardhat, `OFFSET = 3.5`):
+
+| Facing | Expected | Read | Error |
+|---|---|---|---|
+| 1–2 side (+x) | 0° | 0° | 0° (calibration point) |
+| 2–3 side (+y) | +90° | +90° | 0° |
+| 0–3 side | ±180° | +180° | 0° |
+| 0–1 side | −90° | −93° | 3° |
+
+- **Head tilt** (facing the 0–1 side): looking down reads −89° (about 1° shift), looking up reads −102° (about 12° shift). Past those tilts the marker is lost, which is where the gyro has to carry the reading.
+- **Hidden marker:** still read with arms raised, leaning, reaching, and at the floor edges.
+
+**Hardhat position:** with the marker on a 7 cm box over marker 4 (1.00, 0.30) and `MARKER_H_M = 0.08`, it read (1.03, 0.25), about 6 cm off. Not yet measured on a worn hardhat with a plumb-line `NADIR`; `NADIR = (0.75, 0.40)` is the floor centre, not a measured point.
