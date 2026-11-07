@@ -76,6 +76,15 @@
       <canvas id="chart-yaw"></canvas>
     </section>
 
+    <section class="card phone-card" id="phone-card" hidden>
+      <h2>Phone camera <small id="phone-model"></small></h2>
+      <div class="sub">Open <a id="phone-url" target="_blank" rel="noopener">–</a> in Chrome on the phone (same Wi-Fi),
+        accept the certificate warning (Advanced → Proceed), then tap <b>Start streaming</b>.</div>
+      <div id="phone-error" class="error" hidden></div>
+      <div id="phone-empty" class="phone-empty">No phone streaming yet.</div>
+      <div id="phone-feeds" class="phone-feeds"></div>
+    </section>
+
     <section class="card log-card">
       <h2>Events</h2>
       <ol id="log"></ol>
