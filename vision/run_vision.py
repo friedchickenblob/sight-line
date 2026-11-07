@@ -50,8 +50,8 @@ def main() -> None:
     ap.add_argument("--model", default="yolo26n.pt", help="YOLO weights (downloaded on first use)")
     ap.add_argument("--conf", type=float, default=0.35)
     ap.add_argument("--vehicle-conf", type=float, default=0.25, help="YOLO threshold for vehicles")
-    ap.add_argument("--car-marker", type=int, action="append", default=[], metavar="ID",
-                    help="ArUco id taped on the toy car (repeatable)")
+    ap.add_argument("--car-marker", action="append", default=[], metavar="ID|auto",
+                    help="ArUco id taped on the toy car (repeatable), or 'auto' = any non-floor marker")
     ap.add_argument("--car-label", default="toy car")
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--vehicles", nargs="+", default=sorted(VEHICLE_LABELS), help="COCO classes treated as vehicles")
@@ -68,7 +68,8 @@ def main() -> None:
     det = Detector(args.model, args.conf, args.imgsz, not args.no_track, args.vehicles,
                    vehicle_conf=args.vehicle_conf)
     pipe = VisionPipeline(det, layout, fm, args.head_yaw,
-                          hazard_markers={i: args.car_label for i in args.car_marker})
+                          hazard_markers={int(i): args.car_label for i in args.car_marker if i != "auto"},
+                          any_marker_label=args.car_label if "auto" in args.car_marker else None)
     cap = open_source(args)
 
     cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)

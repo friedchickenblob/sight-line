@@ -73,6 +73,14 @@ def test_toy_car_found_by_its_marker_tag():
     assert h["rel_bearing_deg"] == pytest.approx(h["bearing_deg"], abs=0.1)              # head along +x
 
 
+def test_auto_mode_treats_any_non_floor_marker_as_the_car():
+    frame = render(extra={17: (2.5, 0.5)})                   # an id nobody configured
+    out = model_for([WORKER], layout=LAYOUT, any_marker_label="toy car")(frame, 0.0)
+    (h,) = out["hazards"]                                    # floor markers 0-3 are not hazards
+    assert h["label"] == "toy car" and h["track_id"] == 17
+    assert (h["x_m"], h["y_m"]) == pytest.approx((2.5, 0.5), abs=0.03)
+
+
 def test_tag_replaces_the_yolo_box_around_it():
     tag_corners = np.array([[100, 100], [140, 100], [140, 140], [100, 140]], float)
     yolo_car = Detection("vehicle", "car", 0.4, (80, 80, 200, 170), 9)
