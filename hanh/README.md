@@ -39,4 +39,4 @@ Rig: 1.5 × 0.8 m floor, camera on the ceiling 2.5 m up, looking straight down, 
 - **Head tilt** (facing the 0–1 side): looking down reads −89° (about 1° shift), looking up reads −102° (about 12° shift). Past those tilts the marker is lost, which is where the gyro has to carry the reading.
 - **Hidden marker:** still read with arms raised, leaning, reaching, and at the floor edges.
 
-**Hardhat position:** with the marker on a 7 cm box over marker 4 (1.00, 0.30) and `MARKER_H_M = 0.08`, it read (1.03, 0.25), about 6 cm off. Not yet measured on a worn hardhat with a plumb-line `NADIR`; `NADIR = (0.75, 0.40)` is the floor centre, not a measured point.
+**Hardhat position:** with the marker on a 7 cm box over marker 4 (1.00, 0.30) and `MARKER_H_M = 0.08`, it read (1.03, 0.25), about 6 cm off. `NADIR` is now measured with a plumb line at (0.85, 0.60). Position on a worn hardhat is not measured yet.

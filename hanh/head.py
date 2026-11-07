@@ -20,7 +20,7 @@ FLOOR = {                     # tape-measure centres of floor markers (m)
     2: (1.50, 0.80),
     3: (0.00, 0.80),
 }
-NADIR = (0.75, 0.40)  # floor point straight under the lens (m): hang a string from the lens
+NADIR = (0.85, 0.60)  # floor point straight under the lens (m): hang a string from the lens
 CAM_HEIGHT_M = 2.50   # lens to floor (m)
 MARKER_H_M = 1.57     # height of marker 10 above the floor (m): 0 = on the floor
 HEAD_ID = 10
