@@ -9,13 +9,14 @@ import time
 from io import BytesIO
 
 import numpy as np
+import pytest
 from aiohttp import ClientSession
 from aiohttp.test_utils import TestServer
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from av import VideoFrame
 
 from model import NullModel, load_model
-from stream_server import LatestFrameWorker, create_app, render_jpeg
+from stream_server import LatestFrameWorker, PhoneStream, create_app, render_jpeg
 
 
 class FakeCamera(VideoStreamTrack):
@@ -135,3 +136,54 @@ def test_render_jpeg_scales_big_frames_and_their_boxes():
     img = Image.open(BytesIO(render_jpeg(frame, {"detections": [{"xyxy": [960, 540, 1500, 900]}]}))).convert("RGB")
     assert img.size == (1280, 720)
     assert img.getpixel((640, 450))[0] > 180                    # 960 x (1280/1920) = 640: box edge moved with the scale
+
+
+def test_phone_stream_runs_on_its_own_thread_for_the_dashboard():
+    """PhoneStream: the same server inside another program (the dashboard's --phone)."""
+    phone = PhoneStream(NullModel(), host="127.0.0.1", port=0).start()     # port 0: any free port
+    try:
+        assert phone.running and phone.port > 0 and phone.url.startswith("http://")
+        assert phone.status() == {"model": "null", "sessions": []}
+        assert phone.mjpeg(1) is None                                       # no phone yet
+
+        async def stream_then_read():
+            pc = RTCPeerConnection()
+            pc.addTrack(FakeCamera())
+            pc.createDataChannel("results")
+            await pc.setLocalDescription(await pc.createOffer())
+            async with ClientSession() as http:
+                async with http.post(f"http://127.0.0.1:{phone.port}/offer",
+                                     json={"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}) as r:
+                    await pc.setRemoteDescription(RTCSessionDescription(**await r.json()))
+            loop = asyncio.get_running_loop()
+            try:
+                t_end = time.monotonic() + 8.0
+                while time.monotonic() < t_end:                              # status() from another thread
+                    st = await loop.run_in_executor(None, phone.status)
+                    if st["sessions"] and st["sessions"][0]["frames_done"] >= 3:
+                        break
+                    await asyncio.sleep(0.1)
+                frames = await loop.run_in_executor(None, phone.mjpeg, st["sessions"][0]["id"])
+                part = await loop.run_in_executor(None, next, frames)
+                return st, part
+            finally:
+                await pc.close()
+
+        st, part = asyncio.run(stream_then_read())
+    finally:
+        phone.stop()
+    assert st["model"] == "null" and st["sessions"][0]["frames_done"] >= 3
+    assert st["sessions"][0]["latest"]["shape"] == [480, 640, 3]
+    assert part.startswith(b"--frame\r\nContent-Type: image/jpeg")
+    from PIL import Image
+    assert Image.open(BytesIO(part[part.index(b"\xff\xd8"):])).size == (640, 480)
+    assert not phone.running
+
+
+def test_phone_stream_reports_a_busy_port():
+    first = PhoneStream(NullModel(), host="127.0.0.1", port=0).start()
+    try:
+        with pytest.raises(RuntimeError, match="could not start"):
+            PhoneStream(NullModel(), host="127.0.0.1", port=first.port).start()
+    finally:
+        first.stop()
