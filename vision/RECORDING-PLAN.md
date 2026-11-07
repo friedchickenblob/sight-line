@@ -228,7 +228,16 @@ and directions, with and without the worker nearby. Record a different floor or 
    ```bash
    python scripts/track.py clips/A.mp4 results/tracks_A.csv
    python scripts/track.py clips/D.mp4 results/tracks_D.csv
+   python scripts/track.py clips/E.mp4 results/tracks_E.csv
    ```
+   Then run the tracking tests, using the times from the clip log:
+   ```bash
+   python scripts/check_tracks.py parked  results/tracks_A.csv --start 0 --end 10       # first 10 s still
+   python scripts/check_tracks.py speed   results/tracks_A.csv --start 12.3 --end 16.8  # times crossing L1, L2
+   python scripts/check_tracks.py ids     results/tracks_E.csv
+   python scripts/check_tracks.py heading results/tracks_D.csv --start 3 --end 9 --target 2.0 1.0  # one run, W
+   ```
+   Run `heading` once per D run, with that run's start and end times.
 10. **Bring to the check-in:** `results/grid.md`, the decision, and a short clip of D with the boxes drawn on.
 
 ---
