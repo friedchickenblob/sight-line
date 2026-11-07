@@ -13,7 +13,7 @@ when a machine is really about to reach someone. Implements the *Max research gu
 python -m venv .venv
 .venv\Scripts\activate             # Git Bash: source .venv/Scripts/activate
 pip install -r requirements.txt
-python -m pytest                   # 114 tests, synthetic data + BrainFlow's synthetic board, ~1-2 min
+python -m pytest                   # 120 tests, synthetic data + BrainFlow's synthetic board, ~1-2 min
 python scripts/make_fake_data.py   # one fake recording per experiment -> data/fake/
 python scripts/live_yaw.py --source synthetic:joint      # watch fake live yaw
 python scripts/simulate_contact.py --plot out/contact.png
@@ -26,6 +26,20 @@ BrainFlow opens it directly over Bluetooth: one terminal, nothing else to start.
 python scripts/live_yaw.py --record data/raw/session_01.csv
 python scripts/live_yaw.py --mqtt localhost          # also publish head_yaw + muse_health
 ```
+
+### Live dashboard
+
+```bash
+python dashboard/app.py                          # Muse S; open http://127.0.0.1:5000
+python dashboard/app.py --source synthetic:joint # no headband: fake session in real time
+```
+
+Every CSV field live (GYRO, ACC, CAM, MARK, RESET, DROP rows: `kind, t, v0, v1, v2`),
+head yaw, stream health, gyro / accel / yaw charts, and buttons to **start and stop
+recording** (to `data/raw/<name>.csv`, same format as `record.py`), **Mark** and
+**Re-zero**. Flask + plain HTML/CSS/JS, streamed with Server-Sent Events. Takes the
+same `--source`, `--board`, `--mqtt` options as the scripts; `--host 0.0.0.0` opens it
+to other devices on the network.
 
 Every script takes `--source muse | replay:<csv> | synthetic:<scene>`. Downstream code
 cannot tell the three apart; that is the replay safety net (guide p.7c). `--board synthetic`
@@ -102,7 +116,8 @@ the Enter re-zero wasn't recorded, so replay differed from live (one shared
 headmotion/   frame, sources (BrainFlow + replay), yaw (estimator + YawPipeline), contact, health,
               messages, bus (MQTT), cli, calibration, synth (fake Muse + camera), contact_sim, analysis
 scripts/      record, check_stream, live_yaw, analyze, simulate_contact, make_fake_data
-tests/        114 tests; each maps to a guide "check", "DONE WHEN" or review finding
+dashboard/    live dashboard: Flask app (app.py), templates/index.html, static/app.js + style.css
+tests/        120 tests; each maps to a guide "check", "DONE WHEN" or review finding
 docs/         streaming recipe, head-yaw notes, contact maths, experiments tracker,
               agentic-coding notes (pstack)
 calibration.json  measured constants; every value is a PLACEHOLDER until its experiment runs

@@ -3,4 +3,5 @@ matplotlib>=3.7
 brainflow>=5.12      # Muse S over Bluetooth (MUSE_S_BOARD), no muselsl/BlueMuse needed
 pylsl>=1.16          # only for local_clock(), the shared clock (CLAUDE.md)
 paho-mqtt>=2.0       # publish head_yaw / muse_health, read Hanh's camera yaw
+flask>=3.0          # live dashboard (dashboard/app.py)
 pytest>=7
