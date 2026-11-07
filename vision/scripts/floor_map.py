@@ -59,4 +59,4 @@ def parallax_fix(xy, h_m, cfg):
     if not cfg or "camera_height_m" not in cfg or "nadir_m" not in cfg:
         return xy
     C, N = cfg["camera_height_m"], np.array(cfg["nadir_m"], dtype=float)
-    return tuple(N + (np.asarray(xy, dtype=float) - N) * (C - h_m) / C)
+    return tuple(float(v) for v in N + (np.asarray(xy, dtype=float) - N) * (C - h_m) / C)

@@ -28,6 +28,7 @@ except ImportError:
 WEIGHTS = "yolo26n.pt"
 MACHINE_CLS, WORKER_CLS = {2, 7}, {0}  # COCO; after fine-tune use {1}, {0}
 RELOCK_AFTER_S = 0.5
+WORKER_BOX_H_M = 1.3  # height of a person's box centre seen from above (guide page 9)
 
 
 class Velocity:
@@ -128,8 +129,9 @@ def run(source, out_csv=None):
         for (x1, y1, x2, y2), tid, k in zip(r.boxes.xyxy.tolist(), r.boxes.id.int().tolist(),
                                             r.boxes.cls.int().tolist()):
             cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-            # TODO worker: apply Hanh's parallax correction (h ≈ 1.3 m) or use hardhat marker
             (xm, ym), = to_floor(H_, [(cx, cy)])
+            if k in WORKER_CLS:  # box centre is ~chest height: undo parallax (TODO: prefer the hardhat marker)
+                xm, ym = floor_map.parallax_fix((xm, ym), WORKER_BOX_H_M, cfg)
             (machines if k in MACHINE_CLS else workers if k in WORKER_CLS else []).append((tid, xm, ym))
 
         rows = []
