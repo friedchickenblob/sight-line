@@ -7,6 +7,7 @@ Usage: python scripts/track.py clips/D.mp4 results/tracks_D.csv
 """
 import csv, sys, time
 from collections import deque
+import cv2
 import numpy as np
 from ultralytics import YOLO
 
@@ -68,16 +69,43 @@ class MachineLock:
             self.v = v
 
 
+def frames(source):
+    """Yield (t, frame), with t taken when the frame was captured.
+
+    Live camera (int source): pylsl.local_clock() right after cap.read().
+    Video file: the frame's own time in the video (frame index / fps), so velocities are right
+    however fast or slow the model runs. Convert phone clips to a constant 30 fps first.
+    """
+    live = isinstance(source, int)
+    if live:
+        from record_clips import open_cam
+        cap = open_cam(source)
+    else:
+        cap = cv2.VideoCapture(source)
+        if not cap.isOpened():
+            raise SystemExit(f"can't open {source}")
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    i = 0
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            yield (local_clock() if live else i / fps), frame
+            i += 1
+    finally:
+        cap.release()
+
+
 def run(source, out_csv=None):
     model = YOLO(WEIGHTS)
     lock, vel = MachineLock(), {}
     writer = csv.writer(open(out_csv, "w", newline="")) if out_csv else None
     if writer:
         writer.writerow(["t", "id", "cls", "x_m", "y_m", "vx", "vy"])
-    # conf is low on purpose: ByteTrack uses weak boxes in its second matching pass
-    for r in model.track(source=source, stream=True, persist=True, tracker="bytetrack.yaml",
-                         conf=0.1, imgsz=640, verbose=False):
-        t = local_clock()  # TODO: move stamping into the shared capture loop with Hanh
+    for t, frame in frames(source):
+        # conf is low on purpose: ByteTrack uses weak boxes in its second matching pass
+        r = model.track(frame, persist=True, tracker="bytetrack.yaml", conf=0.1, imgsz=640, verbose=False)[0]
         if r.boxes.id is None:
             continue
         machines, workers = [], []
