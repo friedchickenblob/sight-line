@@ -37,5 +37,5 @@ Closes #
 - [ ] Branch is named `owner/what-it-implements` (e.g. `zoe/bytetrack-tracking`)
 - [ ] Every commit follows `type(scope): description`
 - [ ] Follows the shared conventions in `CLAUDE.md` (metres, degrees, `pylsl.local_clock()`, `"v": 1` in messages)
-- [ ] Updated README / `CLAUDE.md` if this changes a rule or a convention
+- [ ] Updated SETUP.md / `CLAUDE.md` if this changes a rule or a convention
 - [ ] No secrets, tokens, recordings or datasets committed

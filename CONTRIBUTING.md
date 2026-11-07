@@ -1,8 +1,8 @@
 # Contributing
 
-The rules for working in this repo live in the [README](README.md).
+The rules for working in this repo live in [SETUP.md](SETUP.md).
 
-- [Setup](README.md#setup)
-- [Contributing](README.md#contributing) (branch names, commit format)
-- [Issues](README.md#issues)
-- [Merging](README.md#merging)
+- [Setup](SETUP.md#setup)
+- [Contributing](SETUP.md#contributing) (branch names, commit format)
+- [Issues](SETUP.md#issues)
+- [Merging](SETUP.md#merging)
