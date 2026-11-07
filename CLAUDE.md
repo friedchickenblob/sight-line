@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Rules for working in this repo. The README has the full explanation for humans.
+Rules for working in this repo. SETUP.md has the full explanation for humans.
 
 ## The project
 
