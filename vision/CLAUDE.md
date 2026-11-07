@@ -10,7 +10,10 @@ Layout:
   `clips/README.md`, and `clips/floor.json` with the measured floor-marker positions (copy `floor.example.json`)
 - `scripts/` — `prep_clip.py` (convert + check phone clips), `eval_grid.py` (detection grid), `speed_test.py`,
   `track.py` (tracking → CSV), `floor_map.py` (temporary floor map until Hanh's `geometry.py`), `check_tracks.py`
-  (tracking tests), `record_clips.py` (record from a webcam)
+  (tracking tests), `record_clips.py` (record from a webcam), `setup_check.py` (are markers seen and big enough
+  at this camera position), `make_markers.py` (printable ArUco PDF)
+- The hazard is an office chair carrying ArUco marker 20 on top; `track.py` finds it by that marker (not YOLO) and
+  keeps only people standing inside the taped area
 - `results/` — filled-in grids and tracks CSVs
 
 Run scripts from `vision/` (they use relative paths like `clips/A.mp4`).

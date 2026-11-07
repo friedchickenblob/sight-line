@@ -34,13 +34,32 @@ def to_floor(H, points):
     return cv2.perspectiveTransform(pts, np.asarray(H, dtype=np.float64)).reshape(-1, 2)
 
 
-def fit_from_frame(frame, markers_m):
-    """Fit H from one frame. Returns (H, worst_error_m), or (None, None) if a floor marker is missing."""
+def detect(frame):
+    """All ArUco markers in a frame: {id: (4, 2) array of corner pixels}."""
     gray = frame if frame.ndim == 2 else cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     corners, ids, _ = _det.detectMarkers(gray)
     if ids is None:
-        return None, None
-    seen = {int(i): c.reshape(4, 2).mean(axis=0) for c, i in zip(corners, ids.flatten()) if int(i) in markers_m}
+        return {}
+    return {int(i): c.reshape(4, 2) for c, i in zip(corners, ids.flatten())}
+
+
+def side_px(corners):
+    """Shortest side of a marker in pixels: the number that decides whether it is still readable."""
+    return float(min(np.linalg.norm(corners[k] - corners[(k + 1) % 4]) for k in range(4)))
+
+
+def in_rig(xy, markers_m, margin_m=0.3):
+    """True if a floor point is inside the box spanned by the floor markers, plus a margin.
+    Used to ignore people and objects outside the taped area (the string puller, the room)."""
+    pts = np.array([markers_m[i] for i in FLOOR_IDS if i in markers_m], dtype=float)
+    lo, hi = pts.min(axis=0) - margin_m, pts.max(axis=0) + margin_m
+    return bool(np.all(np.asarray(xy) >= lo) and np.all(np.asarray(xy) <= hi))
+
+
+def fit_from_frame(frame, markers_m):
+    """Fit H from one frame. Returns (H, worst_error_m), or (None, None) if a floor marker is missing."""
+    found = detect(frame)
+    seen = {i: c.mean(axis=0) for i, c in found.items() if i in markers_m}
     if not all(i in seen for i in FLOOR_IDS):
         return None, None
     keys = sorted(seen)

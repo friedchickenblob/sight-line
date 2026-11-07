@@ -2,6 +2,13 @@
 
 Usage: python scripts/track.py clips/D.mp4 results/tracks_D.csv
        python scripts/track.py 0                     # live webcam, no CSV
+       python scripts/track.py clips/D.mp4 out.csv --machine yolo   # old way: machine = YOLO car/truck box
+
+Machine (default --machine marker): the hazard is an office chair carrying ArUco marker 20 on top. Its
+position comes from the marker, not from YOLO, because the room is full of other chairs. Set
+machine_marker_height_m in clips/floor.json (marker height above the floor) for the parallax fix.
+Workers: YOLO person boxes, kept only if they stand inside the taped area (floor markers 0-3 + 0.3 m),
+so the string puller and people in the background are ignored.
 
 Floor map, best first: Hanh's geometry.py (when it lands) -> fitted from floor markers 0-3 in the
 clip, using the measured positions in clips/floor.json (floor_map.py) -> pixels / 500 placeholder.
@@ -27,6 +34,7 @@ except ImportError:
 
 WEIGHTS = "yolo26n.pt"
 MACHINE_CLS, WORKER_CLS = {2, 7}, {0}  # COCO; after fine-tune use {1}, {0}
+MACHINE_MARKER_ID = 20
 RELOCK_AFTER_S = 0.5
 WORKER_BOX_H_M = 1.3  # height of a person's box centre seen from above (guide page 9)
 
@@ -100,7 +108,7 @@ def frames(source):
         cap.release()
 
 
-def run(source, out_csv=None):
+def run(source, out_csv=None, machine_by="marker"):
     model = YOLO(WEIGHTS)
     lock, vel = MachineLock(), {}
     writer = csv.writer(open(out_csv, "w", newline="")) if out_csv else None
@@ -121,18 +129,30 @@ def run(source, out_csv=None):
                 H_ = floor_map.PLACEHOLDER_H
             else:
                 continue
-        # conf is low on purpose: ByteTrack uses weak boxes in its second matching pass
-        r = model.track(frame, persist=True, tracker="bytetrack.yaml", conf=0.1, imgsz=640, verbose=False)[0]
-        if r.boxes.id is None:
-            continue
         machines, workers = [], []
-        for (x1, y1, x2, y2), tid, k in zip(r.boxes.xyxy.tolist(), r.boxes.id.int().tolist(),
-                                            r.boxes.cls.int().tolist()):
-            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-            (xm, ym), = to_floor(H_, [(cx, cy)])
-            if k in WORKER_CLS:  # box centre is ~chest height: undo parallax (TODO: prefer the hardhat marker)
-                xm, ym = floor_map.parallax_fix((xm, ym), WORKER_BOX_H_M, cfg)
-            (machines if k in MACHINE_CLS else workers if k in WORKER_CLS else []).append((tid, xm, ym))
+        if machine_by == "marker":
+            c = floor_map.detect(frame).get(MACHINE_MARKER_ID)
+            if c is not None:
+                (xm, ym), = to_floor(H_, [c.mean(axis=0)])
+                h = cfg.get("machine_marker_height_m", 0.0) if cfg else 0.0
+                xm, ym = floor_map.parallax_fix((xm, ym), h, cfg)
+                machines.append((MACHINE_MARKER_ID, xm, ym))
+        classes = sorted(WORKER_CLS) if machine_by == "marker" else sorted(WORKER_CLS | MACHINE_CLS)
+        # conf is low on purpose: ByteTrack uses weak boxes in its second matching pass
+        r = model.track(frame, persist=True, tracker="bytetrack.yaml", conf=0.1, imgsz=640, verbose=False,
+                        classes=classes)[0]
+        if r.boxes.id is not None:
+            for (x1, y1, x2, y2), tid, k in zip(r.boxes.xyxy.tolist(), r.boxes.id.int().tolist(),
+                                                r.boxes.cls.int().tolist()):
+                cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+                (xm, ym), = to_floor(H_, [(cx, cy)])
+                if k in WORKER_CLS:  # box centre is ~chest height: undo parallax (TODO: prefer the hardhat marker)
+                    xm, ym = floor_map.parallax_fix((xm, ym), WORKER_BOX_H_M, cfg)
+                    if cfg and not floor_map.in_rig((xm, ym), cfg["markers_m"]):
+                        continue  # outside the taped area: string puller, people in the background
+                    workers.append((tid, xm, ym))
+                elif k in MACHINE_CLS:
+                    machines.append((tid, xm, ym))
 
         rows = []
         m = lock.pick(t, machines)
@@ -152,5 +172,11 @@ def run(source, out_csv=None):
 
 
 if __name__ == "__main__":
-    src = sys.argv[1] if len(sys.argv) > 1 else "0"
-    run(int(src) if src.isdigit() else src, sys.argv[2] if len(sys.argv) > 2 else None)
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument("source", nargs="?", default="0", help="video file, or camera index")
+    p.add_argument("out_csv", nargs="?", help="tracks CSV to write (omit to print)")
+    p.add_argument("--machine", choices=("marker", "yolo"), default="marker",
+                   help="find the machine by ArUco marker 20 (default) or by YOLO car/truck boxes")
+    a = p.parse_args()
+    run(int(a.source) if a.source.isdigit() else a.source, a.out_csv, a.machine)

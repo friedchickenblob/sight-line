@@ -6,6 +6,8 @@ __pycache__/
 
 # Large media / model files (GitHub rejects files >100 MB)
 clips/*.mp4
+clips/*.mov
+clips/*.MOV
 *.pt
 *.onnx
 runs/
