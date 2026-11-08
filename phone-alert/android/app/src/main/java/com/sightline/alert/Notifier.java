@@ -72,6 +72,7 @@ final class Notifier {
     static Notification ongoing(Context c, String text) {
         return new Notification.Builder(c, CH_STATUS)
                 .setSmallIcon(R.drawable.ic_stat)
+                .setColor(0xFFFACC15)                   // SightLine yellow
                 .setContentTitle("SightLine Alert")
                 .setContentText(text)
                 .setOngoing(true)
@@ -85,6 +86,7 @@ final class Notifier {
         String channel = "alert".equals(level) ? CH_ALERT : "warn".equals(level) ? CH_WARN : CH_INFO;
         Notification.Builder b = new Notification.Builder(c, channel)
                 .setSmallIcon(R.drawable.ic_stat)
+                .setColor(0xFFFACC15)                   // SightLine yellow
                 .setContentTitle(title)
                 .setContentText(message)
                 .setStyle(new Notification.BigTextStyle().bigText(message))

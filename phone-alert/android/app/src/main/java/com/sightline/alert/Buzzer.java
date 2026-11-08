@@ -121,6 +121,7 @@ final class Buzzer {
         try {
             Notification n = new Notification.Builder(c, Notifier.CH_BUZZ)
                     .setSmallIcon(R.drawable.ic_stat)
+                .setColor(0xFFFACC15)                   // SightLine yellow
                     .setContentTitle(title)
                     .setContentText(message)
                     .setCategory(Notification.CATEGORY_ALARM)
