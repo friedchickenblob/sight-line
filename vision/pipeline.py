@@ -12,11 +12,13 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
+from vision.blob import BlobFallback
 from vision.detector import Detection, Detector
 from vision.floor import FloorLayout, FloorMap, calibrate, detect_markers
 from vision.overlay import (GREEN, ORANGE, RED, WHITE, YELLOW, draw_angle_panel, draw_floor_markers, draw_grid,
                             draw_head_arrow, label, pt)
 from vision.scene import Scene, WorkerSelector, build_scene
+from vision.tracks import TrackVelocity
 
 
 @dataclass
@@ -45,13 +47,17 @@ class VisionPipeline:
                     nudge_yaw() adds an offset on top instead of setting the yaw.
     worker_marker   ArUco id taped on top of the worker's hardhat: that person is the worker, with a
                     fixed track id (scene.WorkerSelector). None = most confident tracked person.
+    blob_fallback   follow the dark blob under a tagged vehicle while its tag can't be read
+                    (vision.blob; for a dark machine on a lighter floor). Off by default.
+    Every placed worker and hazard gets a floor velocity (vision.tracks) once it has ~0.2 s of history.
     """
 
     def __init__(self, detector: Detector, layout: FloorLayout | None = None,
                  floor_map: FloorMap | None = None, head_yaw_deg: float = 0.0,
                  hazard_markers: dict[int, str] | None = None, dictionary: str | None = None,
                  any_marker_label: str | None = None, tags_only: bool = False, facing_deg: float = 30.0,
-                 heading=None, worker_marker: int | None = None):
+                 heading=None, worker_marker: int | None = None,
+                 blob_fallback: bool = False):
         self.tags_only, self.facing_deg = tags_only, facing_deg
         self.heading, self.yaw_offset_deg = heading, 0.0
         self.detector, self.layout, self.floor_map = detector, layout, floor_map
@@ -70,12 +76,17 @@ class VisionPipeline:
                                           or worker_marker in (layout.markers if layout else ())):
             raise ValueError(f"marker {worker_marker} is the worker's hardhat; it can't be a floor or vehicle marker")
         self.frames = 0
+        self.blob = BlobFallback() if blob_fallback else None
+        self.velocity = TrackVelocity()
 
-    def process(self, frame: np.ndarray) -> FrameResult:
+    def process(self, frame: np.ndarray, t_s: float | None = None) -> FrameResult:
+        """t_s: when the frame was captured (s): pylsl.local_clock() live, frame index / fps for a
+        video. Used for velocities; None = now."""
         self.frames += 1
         if self.heading is not None:
             y = self.heading.yaw_deg
             self.head_yaw_deg = None if y is None else (y + self.yaw_offset_deg + 180) % 360 - 180
+        t = time.perf_counter() if t_s is None else t_s
         found = None
         if self.layout is not None or self.hazard_markers or self.any_marker_label \
                 or self.worker_marker is not None:
@@ -107,8 +118,17 @@ class VisionPipeline:
                         print(f"vehicle tag: marker {mid} -> {self.any_marker_label}", flush=True)
         if tags:
             dets = add_marker_hazards(dets, found or {}, tags)
+            if self.blob is not None:
+                dets += self.blob.update(t, frame, found or {}, tags)
         scene = build_scene(dets, self.floor_map, self.head_yaw_deg, self.selector, found)
+        self._add_velocities(scene, t)
         return FrameResult(scene, status, infer_ms, self.frames, found or {})
+
+    def _add_velocities(self, scene: Scene, t: float) -> None:
+        placed = ([("worker", scene.worker)] if scene.worker else []) + [("hazard", r.hazard) for r in scene.hazards]
+        for role, p in placed:
+            if p.floor_xy is not None:
+                p.v_mps = self.velocity.update((role, p.det.track_id), t, p.floor_xy)
 
     # ------------------------------------------------------------- keyboard
     def nudge_yaw(self, step_deg: float) -> None:
@@ -217,6 +237,10 @@ def summary(scene: Scene) -> str:
     return s
 
 
+def _v(p):
+    return (None, None) if p.v_mps is None else (_r(p.v_mps[0]), _r(p.v_mps[1]))
+
+
 def _r(v, nd=3):
     return None if v is None else round(float(v), nd)
 
@@ -237,13 +261,17 @@ def scene_to_dict(res: FrameResult, head_yaw_deg: float | None, facing_deg: floa
     worker = None
     if sc.worker:
         x, y = xy(sc.worker)
-        worker = {"track_id": sc.worker.det.track_id, "x_m": x, "y_m": y, "conf": _r(sc.worker.det.conf)}
+        vx, vy = _v(sc.worker)
+        worker = {"track_id": sc.worker.det.track_id, "x_m": x, "y_m": y, "vx_mps": vx, "vy_mps": vy,
+                  "conf": _r(sc.worker.det.conf)}
     hazards = []
     for r in sc.hazards:
         d = r.hazard.det
         x, y = xy(r.hazard)
+        vx, vy = _v(r.hazard)
         hazards.append({"track_id": d.track_id, "kind": d.kind, "label": d.label, "source": d.source,
-                        "conf": _r(d.conf), "x_m": x, "y_m": y, "distance_m": _r(r.distance_m),
+                        "conf": _r(d.conf), "x_m": x, "y_m": y, "vx_mps": vx, "vy_mps": vy,
+                        "distance_m": _r(r.distance_m),
                         "bearing_deg": _r(r.bearing_deg, 1), "rel_bearing_deg": _r(r.rel_bearing_deg, 1)})
         if facing_deg is not None:
             hazards[-1]["facing"] = None if r.rel_bearing_deg is None else abs(r.rel_bearing_deg) <= facing_deg

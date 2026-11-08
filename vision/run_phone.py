@@ -143,7 +143,7 @@ class PhoneHazardModel:
 
     def __call__(self, img, t_s: float) -> dict:
         with self._lock:
-            res = self.pipe.process(img)
+            res = self.pipe.process(img, t_s)
             out = scene_to_dict(res, self.pipe.head_yaw_deg, self.pipe.facing_deg, include_others=not self.pipe.tags_only)
             out["t_s"] = t_s
             if self.hub is not None:
@@ -331,6 +331,8 @@ def main() -> None:
                    help="ArUco id taped on the toy car (repeatable), or 'auto' = any non-floor marker; "
                         "its centre is the car's position")
     g.add_argument("--car-label", default="toy car", help="label for marker-tagged vehicles")
+    g.add_argument("--blob-fallback", action="store_true",
+                   help="follow the dark blob under the car while its marker can't be read (dark car, light floor)")
     g.add_argument("--imgsz", type=int, default=640)
     g.add_argument("--vehicles", nargs="+", default=sorted(VEHICLE_LABELS), help="COCO classes treated as vehicles")
     g.add_argument("--tags-only", action="store_true",
@@ -385,7 +387,7 @@ def main() -> None:
     tags = {int(i): args.car_label for i in args.car_marker if i != "auto"}
     pipe = VisionPipeline(det, layout, fm, args.head_yaw, hazard_markers=tags,
                           any_marker_label=args.car_label if auto else None,
-                          tags_only=args.tags_only, facing_deg=args.facing_deg)
+                          tags_only=args.tags_only, facing_deg=args.facing_deg, blob_fallback=args.blob_fallback)
     heading = None
     if args.muse == "dashboard":
         from vision.dashboard_heading import DashboardHeading
