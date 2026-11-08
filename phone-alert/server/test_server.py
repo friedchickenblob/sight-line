@@ -295,3 +295,67 @@ def test_dashboard_listens_for_theme_changes():
     assert "sightline-theme" in js and "window.parent" in js
     assert '[data-theme="dark"]' in css and '[data-theme="light"]' in css
     assert "theme.js" in html
+
+
+# ------------------------------------------------------------------ continuous buzz
+def post_buzz(s, body):
+    req = urllib.request.Request(s.base + "/buzz", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, json.load(r)
+    except urllib.error.HTTPError as e:
+        return e.code, json.load(e)
+
+
+def read_until(resp, event, timeout=5):
+    cur, deadline = {}, time.time() + timeout
+    while time.time() < deadline:
+        line = resp.readline().decode().rstrip("\n")
+        if line == "":
+            if cur.get("event") == event:
+                return cur
+            cur = {}
+        elif ":" in line:
+            k, _, v = line.partition(":")
+            cur[k] = v.strip()
+    raise AssertionError(f"no {event} event")
+
+
+def test_buzz_on_and_off_reach_the_phone_without_ids(s):
+    resp = open_events(s)
+    wait_clients(s, 1)
+    code, body = post_buzz(s, {"v": 1, "on": True, "hold_s": 1.5, "title": "Look at the toy car", "message": "left"})
+    assert code == 200 and body["delivered_to"] == 1
+    ev = read_until(resp, "buzz")
+    d = json.loads(ev["data"])
+    assert d["on"] is True and d["hold_s"] == 1.5 and d["title"] == "Look at the toy car" and "id" not in ev
+    assert s.hub.buzzing()
+    post_buzz(s, {"v": 1, "on": False})
+    assert json.loads(read_until(resp, "buzz")["data"])["on"] is False
+    assert not s.hub.buzzing()
+    assert len(s.hub.history) == 0                     # never stored for replay
+
+
+def test_phone_joining_mid_buzz_gets_the_rest_of_it(s):
+    post_buzz(s, {"v": 1, "on": True, "hold_s": 5})
+    resp = open_events(s)
+    d = json.loads(read_until(resp, "buzz")["data"])
+    assert d["on"] is True and 0 < d["hold_s"] <= 5
+
+
+def test_expired_buzz_not_sent_to_new_phone(s):
+    post_buzz(s, {"v": 1, "on": True, "hold_s": 0.1})
+    time.sleep(0.2)
+    assert not s.hub.buzzing()
+    resp = open_events(s)
+    wait_clients(s, 1)
+    post_buzz(s, {"v": 1, "on": False})
+    assert json.loads(read_until(resp, "buzz")["data"])["on"] is False   # the first buzz it sees is the off
+
+
+@pytest.mark.parametrize("body", [{"v": 1}, {"v": 1, "on": "yes"}, {"v": 1, "on": True, "hold_s": 0},
+                                  {"v": 1, "on": True, "hold_s": 60}, {"v": 2, "on": True}])
+def test_bad_buzz_rejected(s, body):
+    code, out = post_buzz(s, body)
+    assert code == 400 and not out["ok"]

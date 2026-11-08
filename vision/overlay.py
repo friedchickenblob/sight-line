@@ -9,6 +9,7 @@ import numpy as np
 
 RED, GREEN, BLUE = (0, 0, 255), (0, 200, 0), (255, 120, 0)
 YELLOW, ORANGE, WHITE, GREY = (0, 220, 255), (0, 140, 255), (255, 255, 255), (160, 160, 160)
+CYAN = (255, 220, 0)
 
 
 def pt(xy) -> tuple[int, int]:
@@ -71,14 +72,24 @@ def _dial_pt(c, r, deg):
     return int(round(c[0] + r * math.cos(a))), int(round(c[1] - r * math.sin(a)))
 
 
-def draw_angle_panel(img, head_yaw, bearing, rel, facing_deg, target="toy car", heading_note=""):
+def draw_travel_arrow(img, fm, floor_xy, travel_deg, speed_mps, color=CYAN):
+    """On the camera view: where the hazard is heading, as far as it gets in 1 s (0.15-1 m)."""
+    length = min(max(speed_mps or 0.0, 0.15), 1.0)
+    a = math.radians(travel_deg)
+    start, tip = fm.to_pixel([floor_xy, [floor_xy[0] + length * math.cos(a), floor_xy[1] + length * math.sin(a)]])
+    cv2.arrowedLine(img, pt(start), pt(tip), color, 3, cv2.LINE_AA, tipLength=0.25)
+
+
+def draw_angle_panel(img, head_yaw, bearing, rel, facing_deg, target="toy car", heading_note="", motion=None):
     """Top-right panel: a top-down dial with the worker's heading (yellow), the direction to the
     target (orange) and the +-facing_deg cone, plus the numbers and a FACING / NOT FACING verdict.
     head_yaw is None while the live heading isn't ready; bearing / rel are None when the target,
-    the floor map or the heading is missing. heading_note says where the heading comes from."""
+    the floor map or the heading is missing. heading_note says where the heading comes from.
+    motion: {"speed_mps", "travel_deg", "approach_deg", "cone_deg", "approaching", "min_speed_mps"} of the
+    target (cyan arrow at the target on the dial), plus the alert verdict: heading at the worker AND not faced."""
     h, w = img.shape[:2]
     s = max(0.7, min(1.5, h / 720))
-    pw, ph = int(250 * s), int(365 * s)
+    pw, ph = int(250 * s), int((365 if motion is None else 470) * s)
     x0, y0 = w - pw - 10, 40
     if x0 < 0:
         return
@@ -102,6 +113,9 @@ def draw_angle_panel(img, head_yaw, bearing, rel, facing_deg, target="toy car", 
         cv2.arrowedLine(img, c, _dial_pt(c, r, bearing), ORANGE, 2, cv2.LINE_AA, tipLength=0.15)
     if head_yaw is not None:
         cv2.arrowedLine(img, c, _dial_pt(c, r, head_yaw), YELLOW, 3, cv2.LINE_AA, tipLength=0.18)
+    if motion and bearing is not None and motion.get("travel_deg") is not None:
+        at = _dial_pt(c, 0.75 * r, bearing)                  # the target, on the dial, and where it's going
+        cv2.arrowedLine(img, at, _dial_pt(at, 0.45 * r, motion["travel_deg"]), CYAN, 2, cv2.LINE_AA, tipLength=0.3)
     cv2.circle(img, c, 4, WHITE, -1)
 
     side = "" if rel is None else " ahead" if abs(rel) < 1 else " left" if rel > 0 else " right"
@@ -115,6 +129,25 @@ def draw_angle_panel(img, head_yaw, bearing, rel, facing_deg, target="toy car", 
     verdict = ("heading not ready" if head_yaw is None else f"{target} not seen" if rel is None else
                f"FACING (|rel| <= {facing_deg:.0f})" if facing else "NOT FACING")
     cv2.putText(img, verdict, (x0 + 10, y + int(4 * s)), cv2.FONT_HERSHEY_SIMPLEX, 0.65 * s, verdict_col, 2, cv2.LINE_AA)
+    y += int(26 * s)
+    if motion is not None:
+        sp, tr, ap, appr = motion.get("speed_mps"), motion.get("travel_deg"), motion.get("approach_deg"), motion.get("approaching")
+        moving = ("   --" if sp is None else "stopped" if tr is None
+                  else f"{sp:.2f} m/s, {tr:+.0f} deg")
+        cv2.putText(img, f"moving {moving}", (x0 + 10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5 * s, CYAN, 1, cv2.LINE_AA)
+        y += int(22 * s)
+        cv2.putText(img, "approach angle " + ("   --" if ap is None else f"{ap:+5.0f} deg"), (x0 + 10, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5 * s, WHITE, 1, cv2.LINE_AA)
+        y += int(24 * s)
+        txt, col = (("motion unknown", GREY) if appr is None else
+                    ("HEADING AT WORKER", RED) if appr else
+                    ("not heading at worker", GREEN))
+        cv2.putText(img, txt, (x0 + 10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55 * s, col, 2, cv2.LINE_AA)
+        y += int(30 * s)
+        alert = None if appr is None or rel is None or head_yaw is None else bool(appr and not facing)
+        txt, col = ("alert: --", GREY) if alert is None else ("ALERT: BUZZ", RED) if alert else ("no alert", GREEN)
+        cv2.putText(img, txt, (x0 + 10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7 * s, col, 2, cv2.LINE_AA)
+        y += int(24 * s)
     if heading_note:
-        cv2.putText(img, f"heading: {heading_note}", (x0 + 10, y + int(26 * s)), cv2.FONT_HERSHEY_SIMPLEX,
+        cv2.putText(img, f"heading: {heading_note}", (x0 + 10, y), cv2.FONT_HERSHEY_SIMPLEX,
                     0.42 * s, GREY, 1, cv2.LINE_AA)

@@ -50,7 +50,7 @@ $src = "$here\app\src\main"
 Write-Host "1/6 resources"
 Run "$btp\aapt2.exe" compile --dir "$src\res" -o "$build\res.zip"
 Run "$btp\aapt2.exe" link -o "$build\base.apk" -I $androidJar --manifest "$src\AndroidManifest.xml" `
-    --java "$build\gen" --min-sdk-version 26 --target-sdk-version $api --version-code 1 --version-name 1.0 `
+    --java "$build\gen" --min-sdk-version 26 --target-sdk-version $api --version-code 4 --version-name 1.3 `
     --auto-add-overlay "$build\res.zip"
 
 Write-Host "2/6 compile Java"

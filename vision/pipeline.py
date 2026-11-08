@@ -14,8 +14,10 @@ import numpy as np
 
 from vision.blob import BlobFallback
 from vision.detector import Detection, Detector
+from vision.hazards import approach_deg, travel_deg
 from vision.floor import FloorLayout, FloorMap, calibrate, detect_markers
 from vision.overlay import (GREEN, ORANGE, RED, WHITE, YELLOW, draw_angle_panel, draw_floor_markers, draw_grid,
+                            draw_travel_arrow,
                             draw_head_arrow, label, pt)
 from vision.scene import Scene, WorkerSelector, build_scene
 from vision.tracks import TrackVelocity
@@ -42,6 +44,10 @@ class VisionPipeline:
     tags_only       vehicles come only from tags (YOLO vehicle boxes are dropped) and the overlay hides
                     people other than the worker: just the worker, the floor markers and the tagged car.
     facing_deg      the worker is FACING a hazard when |relative angle| <= this (the angle panel).
+    approach_cone_deg  a moving hazard is HEADING AT the worker when its |approach angle| <= this (the angle
+                    between its direction of travel and the direction from it to the worker).
+    min_speed_mps   slower than this counts as stopped (never heading at anyone).
+    The alert (buzz) is: heading at the worker AND the worker not facing it.
     heading         live head yaw source with .yaw_deg (None = not ready) and .status, e.g.
                     vision.head_yaw.MuseHeading. Then head_yaw_deg follows it every frame, and
                     nudge_yaw() adds an offset on top instead of setting the yaw.
@@ -57,13 +63,17 @@ class VisionPipeline:
                  hazard_markers: dict[int, str] | None = None, dictionary: str | None = None,
                  any_marker_label: str | None = None, tags_only: bool = False, facing_deg: float = 30.0,
                  heading=None, worker_marker: int | None = None,
-                 blob_fallback: bool = False):
+                 blob_fallback: bool = False, marker_max_width: int | None = None,
+                 approach_cone_deg: float = 30.0, min_speed_mps: float = 0.1):
         self.tags_only, self.facing_deg = tags_only, facing_deg
+        self.approach_cone_deg, self.min_speed_mps = approach_cone_deg, min_speed_mps
+        self.marker_max_width = marker_max_width       # search markers on a copy this wide (faster); None = full
         self.heading, self.yaw_offset_deg = heading, 0.0
         self.detector, self.layout, self.floor_map = detector, layout, floor_map
         self.frozen = floor_map is not None
         self.head_yaw_deg = head_yaw_deg
         self.selector = WorkerSelector(worker_marker)
+        self.tag_heights = layout.tag_heights() if layout else None   # raised tags -> floor (floor_layout.json)
         self.worker_marker = worker_marker
         self.hazard_markers = dict(hazard_markers or {})
         self.dictionary = dictionary or (layout.dictionary if layout else "DICT_4X4_50")
@@ -88,9 +98,9 @@ class VisionPipeline:
             self.head_yaw_deg = None if y is None else (y + self.yaw_offset_deg + 180) % 360 - 180
         t = time.perf_counter() if t_s is None else t_s
         found = None
-        if self.layout is not None or self.hazard_markers or self.any_marker_label \
-                or self.worker_marker is not None:
-            found = detect_markers(frame, self.dictionary)      # one search serves the floor and the tags
+        if (self.layout is not None or self.hazard_markers or self.any_marker_label
+                or self.worker_marker is not None):
+            found = detect_markers(frame, self.dictionary, self.marker_max_width)  # floor, car and hardhat tags
 
         status = "no floor map (pixels only)"
         if self.layout is not None and not self.frozen:
@@ -120,8 +130,9 @@ class VisionPipeline:
             dets = add_marker_hazards(dets, found or {}, tags)
             if self.blob is not None:
                 dets += self.blob.update(t, frame, found or {}, tags)
-        scene = build_scene(dets, self.floor_map, self.head_yaw_deg, self.selector, found)
+        scene = build_scene(dets, self.floor_map, self.head_yaw_deg, self.selector, found, self.tag_heights)
         self._add_velocities(scene, t)
+        self._add_motion(scene)
         return FrameResult(scene, status, infer_ms, self.frames, found or {})
 
     def _add_velocities(self, scene: Scene, t: float) -> None:
@@ -129,6 +140,30 @@ class VisionPipeline:
         for role, p in placed:
             if p.floor_xy is not None:
                 p.v_mps = self.velocity.update((role, p.det.track_id), t, p.floor_xy)
+
+    def _add_motion(self, scene: Scene) -> None:
+        """Speed, travel direction and approach angle of each hazard, from its velocity (vision.tracks)."""
+        w = scene.worker
+        for r in scene.hazards:
+            v = r.hazard.v_mps
+            if v is None or r.hazard.floor_xy is None:
+                continue
+            r.speed_mps = float(np.hypot(*v))
+            if r.speed_mps >= self.min_speed_mps:
+                r.travel_deg = travel_deg(v)
+                if w is not None and w.floor_xy is not None:
+                    r.approach_deg = approach_deg(r.hazard.floor_xy, v, w.floor_xy)
+
+    def approaching(self, r) -> bool | None:
+        """Heading at the worker? None = unknown (no history yet, no floor map or no worker)."""
+        if r.speed_mps is None or r.distance_m is None:
+            return None
+        if r.speed_mps < self.min_speed_mps:
+            return False
+        return r.approach_deg is not None and abs(r.approach_deg) <= self.approach_cone_deg
+
+    def facing(self, r) -> bool | None:
+        return None if r.rel_bearing_deg is None else abs(r.rel_bearing_deg) <= self.facing_deg
 
     # ------------------------------------------------------------- keyboard
     def nudge_yaw(self, step_deg: float) -> None:
@@ -164,8 +199,13 @@ class VisionPipeline:
         draw_scene(view, res.scene, self.floor_map, self.head_yaw_deg, show_others=not self.tags_only)
         near = next((r for r in res.scene.hazards if r.bearing_deg is not None), None)
         target = res.scene.hazards[0].hazard.det.label if res.scene.hazards else "hazard"
+        motion = None
+        if near is not None:
+            motion = {"speed_mps": near.speed_mps, "travel_deg": near.travel_deg, "approach_deg": near.approach_deg,
+                      "cone_deg": self.approach_cone_deg, "approaching": self.approaching(near),
+                      "min_speed_mps": self.min_speed_mps}
         draw_angle_panel(view, self.head_yaw_deg, near and near.bearing_deg, near and near.rel_bearing_deg,
-                         self.facing_deg, near.hazard.det.label if near else target, self.heading_status)
+                         self.facing_deg, near.hazard.det.label if near else target, self.heading_status, motion)
         if header:
             label(view, header, (10, 25), WHITE, 0.5)
         return view
@@ -220,6 +260,11 @@ def draw_scene(view, scene: Scene, fm: FloorMap | None, yaw: float, show_others:
             if r.rel_bearing_deg is not None:
                 txt += f"  rel {r.rel_bearing_deg:+.0f}"
             cv2.line(view, pt(w.det.ground_px), pt(d.ground_px), RED, 2, cv2.LINE_AA)
+        if r.travel_deg is not None and fm is not None and r.hazard.floor_xy is not None:
+            draw_travel_arrow(view, fm, r.hazard.floor_xy, r.travel_deg, r.speed_mps)
+            txt += f"  {r.speed_mps:.2f} m/s"
+            if r.approach_deg is not None:
+                txt += f"  appr {r.approach_deg:+.0f}"
         label(view, txt, (x1, y1 - 6), ORANGE)
 
 
@@ -246,13 +291,16 @@ def _r(v, nd=3):
 
 
 def scene_to_dict(res: FrameResult, head_yaw_deg: float | None, facing_deg: float | None = None,
-                  include_others: bool = True) -> dict:
+                  include_others: bool = True, pipe: "VisionPipeline | None" = None) -> dict:
     """One sightline/vision/hazards message (docs/vision-hazard-plan.md), JSON-ready.
 
     Floor frame: metres from marker 0; bearing_deg is from the worker to the hazard (0 = +x, CCW +);
     rel_bearing_deg is that minus the head yaw (0 ahead, +90 left, -90 right). The caller adds t_s.
     "detections" is for the phone stream's /view page ({label, conf, xyxy} boxes).
-    With facing_deg, each hazard also gets "facing": |rel_bearing_deg| <= facing_deg (None if unknown)."""
+    With facing_deg, each hazard also gets "facing": |rel_bearing_deg| <= facing_deg (None if unknown).
+    With pipe, each hazard also gets its motion: speed_mps, travel_deg, approach_deg (0 = moving straight at
+    the worker) and "approaching" (|approach_deg| <= the pipeline's cone and faster than its min speed;
+    None if unknown), and "alert": approaching and not facing (None if either is unknown)."""
     sc = res.scene
 
     def xy(p):
@@ -275,6 +323,11 @@ def scene_to_dict(res: FrameResult, head_yaw_deg: float | None, facing_deg: floa
                         "bearing_deg": _r(r.bearing_deg, 1), "rel_bearing_deg": _r(r.rel_bearing_deg, 1)})
         if facing_deg is not None:
             hazards[-1]["facing"] = None if r.rel_bearing_deg is None else abs(r.rel_bearing_deg) <= facing_deg
+        if pipe is not None:
+            appr, facing = pipe.approaching(r), hazards[-1].get("facing")
+            hazards[-1].update(speed_mps=_r(r.speed_mps), travel_deg=_r(r.travel_deg, 1),
+                               approach_deg=_r(r.approach_deg, 1), approaching=appr,
+                               alert=None if appr is None or facing is None else bool(appr and not facing))
 
     def box(det, text):
         return {"label": text, "conf": _r(det.conf, 2), "xyxy": [_r(v, 1) for v in det.box]}

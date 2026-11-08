@@ -121,3 +121,20 @@ def test_yolo_detects_person_and_vehicle_on_sample_image():
     kinds = {d.kind for d in dets}
     assert kinds == {"person", "vehicle"}
     assert any(d.label == "bus" for d in dets)
+
+
+def test_raised_machine_tag_distance_uses_its_floor_point(fm):
+    """build_scene with tag heights: a tag 0.8 m up on the machine is placed where the machine stands."""
+    from test_floor import CAM
+    from vision.floor import TagHeights
+
+    worker = fake("person", (1.0, 1.0), track_id=1)
+    px = project([[2.0, 1.0, 0.8]])[0]                       # tag on top of a machine standing at (2.0, 1.0)
+    tag = Detection("vehicle", "chair", 1.0, (px[0] - 5, px[1] - 5, px[0] + 5, px[1] + 5), 20,
+                    ground=(float(px[0]), float(px[1])), source="marker")
+    raw = build_scene([worker, tag], fm).hazards[0]
+    th = TagHeights(float(CAM[2]), (float(CAM[0]), float(CAM[1])), {20: 0.8})
+    fixed = build_scene([worker, tag], fm, tag_heights=th).hazards[0]
+    assert abs(raw.distance_m - 1.0) > 0.2                    # uncorrected: wrong by tens of cm
+    assert fixed.distance_m == pytest.approx(1.0, abs=0.03)
+    assert fixed.bearing_deg == pytest.approx(0, abs=2)
