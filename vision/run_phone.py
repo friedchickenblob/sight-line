@@ -344,7 +344,9 @@ def main() -> None:
     g.add_argument("--mqtt", metavar="HOST[:PORT]", help="also publish each message on sightline/vision/hazards")
     m = ap.add_argument_group("worker heading (Muse S)")
     m.add_argument("--muse", nargs="?", const="muse", metavar="SOURCE",
-                   help="live heading from the Muse: muse (default) | synthetic:<scene> | replay:<csv>")
+                   help="live heading from the Muse: muse (default) | dashboard (the running head-motion dashboard "
+                        "owns the Muse and this reads its yaw) | synthetic:<scene> | replay:<csv>")
+    m.add_argument("--dashboard-url", default="http://127.0.0.1:5000", help="where --muse dashboard reads the yaw")
     m.add_argument("--muse-board", default=None, choices=["muse_s", "muse_s_bled", "synthetic"],
                    help="muse_s = laptop Bluetooth (default); muse_s_bled = BLED112 dongle; synthetic = BrainFlow fake")
     m.add_argument("--muse-name", help="Bluetooth name of the band (e.g. MuseS-1A2B) if several are around")
@@ -377,7 +379,11 @@ def main() -> None:
                           any_marker_label=args.car_label if auto else None,
                           tags_only=args.tags_only, facing_deg=args.facing_deg)
     heading = None
-    if args.muse:
+    if args.muse == "dashboard":
+        from vision.dashboard_heading import DashboardHeading
+        heading = DashboardHeading(args.dashboard_url, flip=args.muse_flip).start()
+        pipe.heading = heading
+    elif args.muse:
         from vision.head_yaw import MuseHeading
         heading = MuseHeading(args.muse, bias_s=args.muse_bias, flip=args.muse_flip, board=args.muse_board,
                               name=args.muse_name, mac=args.muse_mac, serial_port=args.muse_port).start()
@@ -402,7 +408,7 @@ def main() -> None:
     print(f"overlay page (Vision tab):       {scheme}://localhost:{args.port}/overlay")
     print(f"vehicles: YOLO {sorted(det.vehicle_labels)} >= {det.vehicle_conf}"
           + (f", tagged {args.car_label} = marker {args.car_marker}" if tags or auto else ""))
-    print("heading: " + (f"Muse ({args.muse}); re-zero facing +x: z key or {scheme}://localhost:{args.port}/zero"
+    print("heading: " + (f"{'dashboard at ' + args.dashboard_url if args.muse == 'dashboard' else 'Muse (' + args.muse + ')'}; re-zero facing +x: z key or {scheme}://localhost:{args.port}/zero"
                          if heading else "manual, a / d keys"))
     if args.mqtt:
         print(f"mqtt: {HazardHub.TOPIC} on {args.mqtt}")

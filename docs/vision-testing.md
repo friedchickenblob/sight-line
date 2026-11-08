@@ -220,6 +220,13 @@ Options: `--muse-name MuseS-1A2B` / `--muse-mac` when several bands are around, 
 the yaw, `--facing-deg 30` the facing cone. Without hardware, `--muse synthetic:joint` (recorded fake head
 motion) or `--muse --muse-board synthetic` (BrainFlow's fake board) run the same code path.
 
+**Sharing the band with the dashboard.** Only one program can hold the Muse. To see the same heading in the
+phone-alert page's Dashboard tab and the Vision tab, let the dashboard own the band
+(`python phone-alert/server/server.py --dashboard`, with the `max/` venv's Python) and start the vision
+server with `--muse dashboard` instead of `--muse`. It then reads the yaw from the dashboard
+(`--dashboard-url`, default `http://127.0.0.1:5000`), and `z` / the Zero button calls the dashboard's re-zero.
+`--muse-flip` works the same way. The calibration and bias steps below happen in the dashboard.
+
 `a` / `d` still work with `--muse`: they add a fixed offset on top of the Muse heading (shown in the panel).
 
 **Limits.** The Muse has no magnetometer, so the heading is relative to the last zero and drifts slowly.
