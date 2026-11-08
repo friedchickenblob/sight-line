@@ -64,6 +64,7 @@ class VisionPipeline:
         self.frozen = floor_map is not None
         self.head_yaw_deg = head_yaw_deg
         self.selector = WorkerSelector(worker_marker)
+        self.tag_heights = layout.tag_heights() if layout else None   # raised tags -> floor (floor_layout.json)
         self.worker_marker = worker_marker
         self.hazard_markers = dict(hazard_markers or {})
         self.dictionary = dictionary or (layout.dictionary if layout else "DICT_4X4_50")
@@ -120,7 +121,7 @@ class VisionPipeline:
             dets = add_marker_hazards(dets, found or {}, tags)
             if self.blob is not None:
                 dets += self.blob.update(t, frame, found or {}, tags)
-        scene = build_scene(dets, self.floor_map, self.head_yaw_deg, self.selector, found)
+        scene = build_scene(dets, self.floor_map, self.head_yaw_deg, self.selector, found, self.tag_heights)
         self._add_velocities(scene, t)
         return FrameResult(scene, status, infer_ms, self.frames, found or {})
 
