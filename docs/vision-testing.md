@@ -172,6 +172,12 @@ and allow Python through Windows Firewall.
 .venv\Scripts\python -m vision.run_phone --layout floor_layout.json --car-marker 42 --tags-only
 ```
 
+**Buzz the phone.** `--buzz` sends a notification through the phone-alert server (`http://localhost:8765`, or
+`--buzz URL`) every 5 s (`--buzz-every`) while a worker is in view and a hazard shows **NOT FACING**. It only
+sends if a phone app is connected to that server (otherwise the terminal says so once), and never when the
+verdict is blank (heading not ready or lost). Start `python phone-alert/server/server.py` first; add
+`--alert-token` if that server has a `--token`.
+
 **Angle panel** (top right of the overlay window): a top-down dial in the floor frame (+x right,
 +y up) with the worker's heading (yellow arrow), the direction from the worker to the car (orange
 arrow) and the facing cone (shaded). Below it: worker heading, car bearing, relative angle (+ = car

@@ -127,8 +127,9 @@ class PhoneHazardModel:
     """
 
     def __init__(self, pipeline: VisionPipeline, window: bool = False, save_path: str = "floor_calib.json",
-                 layout_path: str | None = None, print_every_s: float = 1.0, hub: HazardHub | None = None):
-        self.pipe, self.window, self.hub = pipeline, window, hub
+                 layout_path: str | None = None, print_every_s: float = 1.0, hub: HazardHub | None = None,
+                 buzzer=None):
+        self.pipe, self.window, self.hub, self.buzzer = pipeline, window, hub, buzzer
         self._window_open = False              # an OpenCV window currently exists
         self.save_path, self.layout_path = save_path, layout_path
         self.print_every_s = print_every_s
@@ -147,6 +148,8 @@ class PhoneHazardModel:
             out["t_s"] = t_s
             if self.hub is not None:
                 self.hub.publish({k: v for k, v in out.items() if k != "detections"})   # boxes are /view-only
+            if self.buzzer is not None:
+                self.buzzer.update(out)
             now = time.perf_counter()
             if self._t_prev is not None:
                 inst = 1 / max(now - self._t_prev, 1e-6)
@@ -342,6 +345,11 @@ def main() -> None:
     g.add_argument("--print-every", type=float, default=1.0, help="console summary interval (s), 0 = off")
     g.add_argument("--window", action="store_true", help="also show the overlay in an OpenCV window (default: web page at /overlay)")
     g.add_argument("--mqtt", metavar="HOST[:PORT]", help="also publish each message on sightline/vision/hazards")
+    g.add_argument("--buzz", nargs="?", const="http://localhost:8765", metavar="URL",
+                   help="buzz the phone through the phone-alert server (default http://localhost:8765) while the "
+                        "worker is not facing a hazard, every --buzz-every seconds, only if a phone is connected")
+    g.add_argument("--buzz-every", type=float, default=5.0, help="seconds between buzzes")
+    g.add_argument("--alert-token", help="the phone-alert server's --token, if it has one")
     m = ap.add_argument_group("worker heading (Muse S)")
     m.add_argument("--muse", nargs="?", const="muse", metavar="SOURCE",
                    help="live heading from the Muse: muse (default) | dashboard (the running head-motion dashboard "
@@ -389,8 +397,12 @@ def main() -> None:
                               name=args.muse_name, mac=args.muse_mac, serial_port=args.muse_port).start()
         pipe.heading = heading
     hub = HazardHub(args.mqtt)
+    buzzer = None
+    if args.buzz:
+        from vision.buzz import PhoneBuzzer
+        buzzer = PhoneBuzzer(args.buzz, args.buzz_every, args.alert_token)
     model = PhoneHazardModel(pipe, window=args.window, save_path=args.save, layout_path=args.layout,
-                             print_every_s=args.print_every, hub=hub)
+                             print_every_s=args.print_every, hub=hub, buzzer=buzzer)
 
     ip = server.lan_ip()
     ssl_ctx = None
@@ -412,6 +424,8 @@ def main() -> None:
                          if heading else "manual, a / d keys"))
     if args.mqtt:
         print(f"mqtt: {HazardHub.TOPIC} on {args.mqtt}")
+    if buzzer:
+        print(f"buzz: every {args.buzz_every:g} s while the worker is not facing a hazard, via {args.buzz} (needs a phone connected)")
     print(f"status:                          {scheme}://localhost:{args.port}/status\n")
     app = server.create_app(model, args.view_fps)
     hub.attach(app)
