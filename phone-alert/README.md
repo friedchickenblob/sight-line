@@ -120,6 +120,26 @@ import requests
 requests.post("http://localhost:8765/notify", json={"v": 1, "title": "Head not on truck", "level": "alert"})
 ```
 
+### Continuous buzz (app 1.1+)
+
+For "buzz exactly while something is true" (the vision server's worker-not-facing-the-hazard signal):
+
+```bash
+curl -X POST http://127.0.0.1:8765/buzz -H "Content-Type: application/json" \
+     -d '{"v":1,"on":true,"hold_s":1.5,"title":"Look at the toy car","message":"1.2 m away, to your left"}'
+curl -X POST http://127.0.0.1:8765/buzz -H "Content-Type: application/json" -d '{"v":1,"on":false}'
+```
+
+`on: true` starts the app's sound (`app/src/main/res/raw/buzz_sound.mp3`, played on loop at alarm volume) plus a
+repeating vibration and a silent "Hazard buzz" notification. It must be repeated sooner than `hold_s` (max 10 s)
+to keep going: the app stops by itself once `hold_s` passes without one, so a crashed sender or a dropped
+Wi-Fi never leaves the phone buzzing. `on: false` stops it at once. Buzz messages go straight to the
+connected phones and are never stored or replayed; a phone that connects mid-buzz buzzes for what's left of it.
+`GET /api/state` includes `"buzzing"`.
+
+On Windows, send to `127.0.0.1` rather than `localhost`: `localhost` tries IPv6 first and each request waits
+~2 s for that to fail.
+
 **MQTT.** `python server.py --mqtt localhost` also forwards any message on `sightline/alert` (change with
 `--mqtt-topic`) using the same JSON. The topic name is a proposal: the team's message contract is not final, so
 check it with Jordan before anything publishes to it.
@@ -132,7 +152,15 @@ cd phone-alert\android
 ```
 
 It uses only the Android SDK and Android Studio's bundled JDK (no Gradle, nothing downloaded) and writes
-`build\SightLineAlert.apk`. The package is `com.sightline.alert`; the display name is in
+`build\SightLineAlert.apk`.
+
+Without Android Studio, a portable setup works too (nothing installed system-wide): unzip a JDK 17 (e.g.
+Temurin) and Google's "command line tools only" into one folder, run
+`sdkmanager --sdk_root=<folder>\android-sdk platforms/android-35 build-tools/35.0.0 platform-tools`
+(newer sdkmanagers use `/` in package names), then build with
+`$env:JAVA_HOME="<jdk>"; $env:ANDROID_HOME="<folder>\android-sdk"; .\build.ps1`. The script signs with
+`%USERPROFILE%\.android\debug.keystore`; keep that key, because an update only installs over an app signed
+with the same key (otherwise uninstall the old app first). The package is `com.sightline.alert`; the display name is in
 `app/src/main/res/values/strings.xml`.
 
 ## Troubleshooting

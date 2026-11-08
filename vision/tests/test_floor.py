@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import pytest
 
-from vision.floor import FloorLayout, FloorMap, calibrate, ground_point
+from vision.floor import FloorLayout, FloorMap, TagHeights, calibrate, ground_point, lift_to_floor
 
 LAYOUT = FloorLayout("DICT_4X4_50", 0.25, {0: (0.0, 0.0), 1: (3.0, 0.0), 2: (3.0, 2.0), 3: (0.0, 2.0)})
 IMG_W, IMG_H, F = 1280, 720, 600.0   # ~94 deg horizontal FOV, typical wide webcam
@@ -92,3 +92,54 @@ def test_ground_point_is_bottom_centre():
 def test_too_few_markers_raises():
     with pytest.raises(ValueError):
         calibrate(np.full((IMG_H, IMG_W), 255, np.uint8), LAYOUT)
+
+
+# --------------------------------------------------------------------------- raised tags
+NADIR = (float(CAM[0]), float(CAM[1]))      # floor point straight under the simulated lens
+
+
+def test_lift_to_floor_formula():
+    # mapped 1 m from the nadir, tag 0.8 m up, camera 2.5 m up -> really 1 * 1.7 / 2.5 = 0.68 m away
+    assert lift_to_floor((2.0, 0.5), 0.8, 2.5, (1.0, 0.5)) == pytest.approx((1.68, 0.5))
+    assert lift_to_floor((2.0, 0.5), 0.0, 2.5, (1.0, 0.5)) == pytest.approx((2.0, 0.5))   # on the floor: unchanged
+    with pytest.raises(ValueError):
+        lift_to_floor((2.0, 0.5), 2.5, 2.5, (1.0, 0.5))                                   # at the lens: impossible
+
+
+@pytest.mark.parametrize("xy,h", [((1.2, 1.0), 0.8), ((2.0, 0.5), 1.6), ((0.4, 1.8), 1.2)])
+def test_raised_tag_is_moved_back_onto_its_floor_point(xy, h):
+    """Photograph a tag at height h with the angled camera, map it, correct it: lands on its floor point."""
+    from vision.detector import Detection
+
+    fm = calibrate(render(), LAYOUT)[0]
+    px = project([[xy[0], xy[1], h]])[0]
+    mapped = fm.to_floor([px])[0]
+    assert np.hypot(*(mapped - np.array(xy))) > 0.3                 # uncorrected: tens of cm off
+    th = TagHeights(float(CAM[2]), NADIR, {20: h})
+    tag = Detection("vehicle", "chair", 1.0, (0, 0, 1, 1), 20, ground=tuple(px), source="marker")
+    assert th.fix(tag, tuple(mapped)) == pytest.approx(xy, abs=0.02)
+
+
+def test_only_raised_tags_are_corrected():
+    from vision.detector import Detection
+
+    th = TagHeights(2.5, (1.0, 0.5), {20: 0.8})
+    box = Detection("vehicle", "car", 0.9, (0, 0, 1, 1), 20)                       # YOLO box bottom: on the floor
+    other = Detection("vehicle", "car", 1.0, (0, 0, 1, 1), 21, source="marker")    # tag with no height given
+    blob = Detection("vehicle", "chair", 0.5, (0, 0, 1, 1), 20, source="blob")     # blob stands in for tag 20
+    assert th.fix(box, (2.0, 0.5)) == (2.0, 0.5)
+    assert th.fix(other, (2.0, 0.5)) == (2.0, 0.5)
+    assert th.fix(blob, (2.0, 0.5)) == pytest.approx((1.68, 0.5))
+    assert th.fix(blob, None) is None
+
+
+def test_layout_reads_camera_and_tag_heights(tmp_path):
+    p = tmp_path / "layout.json"
+    p.write_text('{"marker_size_m": 0.12, "markers": {"0": [0, 0], "1": [2.25, 0]}, '
+                 '"camera_height_m": 2.5, "nadir_m": [1.125, 0.5], "tag_heights_m": {"20": 0.8, "10": 1.59}}')
+    th = FloorLayout.load(p).tag_heights()
+    assert th.camera_height_m == 2.5 and th.nadir_m == (1.125, 0.5) and th.heights_m == {20: 0.8, 10: 1.59}
+    p.write_text('{"marker_size_m": 0.12, "markers": {"0": [0, 0]}}')
+    assert FloorLayout.load(p).tag_heights() is None                # old layouts: no correction
+    with pytest.raises(ValueError):
+        TagHeights(2.5, (0, 0), {20: 3.0})                          # a tag above the camera is a typo

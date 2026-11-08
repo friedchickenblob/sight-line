@@ -29,6 +29,10 @@ class HazardReading:
     distance_m: float | None = None
     bearing_deg: float | None = None           # floor frame: 0 = +x, CCW +
     rel_bearing_deg: float | None = None       # relative to head yaw: 0 ahead, +90 left
+    # motion (filled in by VisionPipeline, which keeps the per-track history)
+    speed_mps: float | None = None
+    travel_deg: float | None = None            # direction it's moving: 0 = +x, CCW +
+    approach_deg: float | None = None          # travel direction vs. direction to the worker: 0 = straight at them
 
 
 @dataclass
@@ -96,10 +100,13 @@ class WorkerSelector:
 
 def build_scene(dets: list[Detection], floor_map: FloorMap | None = None,
                 head_yaw_deg: float | None = None, selector: WorkerSelector | None = None,
-                markers: dict | None = None) -> Scene:
-    """markers: {ArUco id: 4x2 corner pixels} seen this frame, used by a hardhat WorkerSelector."""
+                markers: dict | None = None, tag_heights=None) -> Scene:
+    """markers: {ArUco id: 4x2 corner pixels} seen this frame, used by a hardhat WorkerSelector.
+    tag_heights: vision.floor.TagHeights, moves raised tags (machine tag, hardhat) down to the floor."""
     def place(d: Detection) -> Placed:
         xy = None if floor_map is None else tuple(float(v) for v in floor_map.to_floor([d.ground_px])[0])
+        if tag_heights is not None:
+            xy = tag_heights.fix(d, xy)
         return Placed(d, xy)
 
     people = [d for d in dets if d.kind == "person"]

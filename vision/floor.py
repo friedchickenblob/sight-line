@@ -8,6 +8,13 @@ large per-marker error in the calibration report.
 floor_layout.json example:
     {"dictionary": "DICT_4X4_50", "marker_size_m": 0.15,
      "markers": {"0": [0.0, 0.0], "1": [3.0, 0.0], "2": [3.0, 2.0], "3": [0.0, 2.0]}}
+
+Optional, for tags that sit above the floor (a tag on the machine, the hardhat tag). The floor map
+puts a raised tag too far from the point under the camera, by (distance) x h / camera height, so
+these let the pipeline move it back (TagHeights):
+    "camera_height_m": 2.5,              lens to floor
+    "nadir_m": [1.125, 0.5],             floor point straight under the lens (hang a string from it)
+    "tag_heights_m": {"20": 0.8, "10": 1.59}   tag id -> height of the tag above the floor
 """
 
 from __future__ import annotations
@@ -26,12 +33,25 @@ class FloorLayout:
     dictionary: str
     marker_size_m: float
     markers: dict[int, tuple[float, float]]   # id -> centre (x, y) in metres
+    camera_height_m: float | None = None
+    nadir_m: tuple[float, float] | None = None
+    tag_heights_m: dict[int, float] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: str | Path) -> "FloorLayout":
         d = json.loads(Path(path).read_text())
+        nadir = d.get("nadir_m")
         return cls(d.get("dictionary", "DICT_4X4_50"), float(d["marker_size_m"]),
-                   {int(k): (float(v[0]), float(v[1])) for k, v in d["markers"].items()})
+                   {int(k): (float(v[0]), float(v[1])) for k, v in d["markers"].items()},
+                   None if d.get("camera_height_m") is None else float(d["camera_height_m"]),
+                   None if nadir is None else (float(nadir[0]), float(nadir[1])),
+                   {int(k): float(v) for k, v in d.get("tag_heights_m", {}).items()})
+
+    def tag_heights(self) -> "TagHeights | None":
+        """The height correction for raised tags, or None if the layout doesn't describe the camera."""
+        if self.camera_height_m is None or self.nadir_m is None or not self.tag_heights_m:
+            return None
+        return TagHeights(self.camera_height_m, self.nadir_m, dict(self.tag_heights_m))
 
     def corners_m(self, marker_id: int) -> np.ndarray:
         """Floor positions of a marker's corners in ArUco order: TL, TR, BR, BL (top faces +y)."""
@@ -44,14 +64,57 @@ def aruco_dictionary(name: str):
     return cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, name))
 
 
-def detect_markers(image: np.ndarray, dictionary_name: str = "DICT_4X4_50") -> dict[int, np.ndarray]:
-    """Return {marker id: 4x2 corner pixels (TL, TR, BR, BL)}."""
+def detect_markers(image: np.ndarray, dictionary_name: str = "DICT_4X4_50",
+                   max_width: int | None = None) -> dict[int, np.ndarray]:
+    """Return {marker id: 4x2 corner pixels (TL, TR, BR, BL)}, in the full image's pixels.
+
+    max_width: search a copy shrunk to this width, then refine the corners on the full image
+    (sub-pixel). About 3x faster on a cluttered 1080p frame with the same corners to ~1 px;
+    too small (e.g. 640 for 1080p) starts missing small or far markers."""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
     detector = cv2.aruco.ArucoDetector(aruco_dictionary(dictionary_name), cv2.aruco.DetectorParameters())
-    corners, ids, _ = detector.detectMarkers(gray)
+    scale = max_width / gray.shape[1] if max_width and gray.shape[1] > max_width else 1.0
+    search = gray if scale == 1.0 else cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    corners, ids, _ = detector.detectMarkers(search)
     if ids is None:
         return {}
-    return {int(i): c.reshape(4, 2).astype(float) for i, c in zip(ids.flatten(), corners)}
+    pts = np.concatenate([c.reshape(4, 2) for c in corners]).astype(np.float32)
+    if scale != 1.0:
+        pts /= scale
+        win = max(2, int(round(1 / scale)) + 1)
+        cv2.cornerSubPix(gray, pts, (win, win), (-1, -1),
+                         (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.01))
+    return {int(i): pts[4 * k:4 * k + 4].astype(float) for k, i in enumerate(ids.flatten())}
+
+
+# --------------------------------------------------------------------------- raised tags
+def lift_to_floor(xy, h_m: float, camera_height_m: float, nadir_m) -> tuple[float, float]:
+    """Floor point under a point seen at height h_m. The floor map projects it along the camera ray
+    down to the floor, which overshoots away from the nadir N:  P = N + (P_mapped - N) (C - h) / C."""
+    if not 0 <= h_m < camera_height_m:
+        raise ValueError(f"tag height {h_m} m must be between 0 and the camera height {camera_height_m} m")
+    n = np.asarray(nadir_m, dtype=float)
+    p = n + (np.asarray(xy, dtype=float) - n) * (camera_height_m - h_m) / camera_height_m
+    return float(p[0]), float(p[1])
+
+
+@dataclass
+class TagHeights:
+    camera_height_m: float
+    nadir_m: tuple[float, float]
+    heights_m: dict[int, float]                 # tag id -> height above the floor (m)
+
+    def __post_init__(self):
+        for mid, h in self.heights_m.items():
+            if not 0 <= h < self.camera_height_m:
+                raise ValueError(f"tag {mid}: height {h} m must be between 0 and the camera height")
+
+    def fix(self, det, xy):
+        """Correct a placed detection whose floor point is a raised tag (source marker or blob)."""
+        h = self.heights_m.get(det.track_id)
+        if xy is None or h is None or det.source not in ("marker", "blob"):
+            return xy
+        return lift_to_floor(xy, h, self.camera_height_m, self.nadir_m)
 
 
 # --------------------------------------------------------------------------- mapping

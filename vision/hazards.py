@@ -39,3 +39,15 @@ def relative_bearing_deg(bearing: float, head_yaw: float) -> float:
 def in_view(rel_bearing: float, fov_deg: float = 120.0) -> bool:
     """True if a direction is inside a field of view centred on the head."""
     return abs(rel_bearing) <= fov_deg / 2.0
+
+
+# ------------------------------------------------------------------ hazard motion
+def travel_deg(velocity: Vec) -> float:
+    """Direction a velocity points (0 = +x, CCW positive)."""
+    return wrap180(math.degrees(math.atan2(velocity[1], velocity[0])))
+
+
+def approach_deg(hazard_xy: Vec, velocity: Vec, worker_xy: Vec) -> float:
+    """Angle between where the hazard is going and the direction from it to the worker:
+    0 = heading straight at the worker, +90 = passing with the worker on its left, 180 = moving away."""
+    return wrap180(bearing_deg(hazard_xy, worker_xy) - travel_deg(velocity))

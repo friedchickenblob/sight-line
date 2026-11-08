@@ -6,6 +6,7 @@
     python -m vision.run_phone --layout floor_layout.json --car-marker 4            # toy car tagged with marker 4
     python -m vision.run_phone --layout floor_layout.json --car-marker 42 --tags-only   # only worker, floor markers, car tag
     python -m vision.run_phone --layout floor_layout.json --car-marker 42 --tags-only --muse   # heading from the Muse S
+    python -m vision.run_phone --layout floor_layout.json --car-marker 42 --worker-marker 10 --tags-only   # hardhat tag 10
 
 It starts Sean's phone-stream server (stream_data/stream_server.py) with this pipeline as its model:
 1. Phone and computer on the same Wi-Fi (or the phone's hotspot).
@@ -144,7 +145,8 @@ class PhoneHazardModel:
     def __call__(self, img, t_s: float) -> dict:
         with self._lock:
             res = self.pipe.process(img, t_s)
-            out = scene_to_dict(res, self.pipe.head_yaw_deg, self.pipe.facing_deg, include_others=not self.pipe.tags_only)
+            out = scene_to_dict(res, self.pipe.head_yaw_deg, self.pipe.facing_deg,
+                                include_others=not self.pipe.tags_only, pipe=self.pipe)
             out["t_s"] = t_s
             if self.hub is not None:
                 self.hub.publish({k: v for k, v in out.items() if k != "detections"})   # boxes are /view-only
@@ -214,7 +216,9 @@ class PhoneHazardModel:
               "/overlay, /hazards and the terminal (Ctrl+C stops)", flush=True)
 
     def attach(self, app) -> None:
-        """Add GET /overlay (page), /overlay.mjpg (video), /control/<action>, /window and /zero."""
+        """Add GET /overlay (page), /overlay.mjpg (video), /control/<action>, /window, /zero and
+        GET/POST /buzz (buzz settings: {"enabled": bool, "every_s": seconds}) and GET/POST /fov
+        (the worker's field of view for FACING: {"fov_deg": degrees}, = 2 x --facing-deg)."""
         from aiohttp import web
 
         async def reopen(request):
@@ -268,6 +272,69 @@ class PhoneHazardModel:
                 raise web.HTTPNotFound(text="unknown action\n")
             return web.Response(text="ok\n")
 
+        async def buzz_get(request):
+            if self.buzzer is None:
+                return web.json_response({"available": False})
+            return web.json_response({"available": True, **self.buzzer.settings()})
+
+        async def buzz_set(request):
+            if self.buzzer is None:
+                return web.json_response({"available": False, "error": "start the server with --buzz"}, status=409)
+            try:
+                d = await request.json()
+                every = d.get("every_s")
+                s = self.buzzer.configure(None if every is None else float(every), d.get("enabled"), d.get("level"),
+                                          d.get("mode"))
+            except (ValueError, TypeError) as e:
+                return web.json_response({"available": True, "error": str(e)}, status=400)
+            how = "continuous" if s["mode"] == "continuous" else f"pulse every {s['every_s']:g} s, {s['level']}"
+            print(f"[buzz] {'on' if s['enabled'] else 'off'}, {how} (set from the overlay page)", flush=True)
+            return web.json_response({"available": True, **s})
+
+        def fov_state():
+            return {"fov_deg": round(2 * self.pipe.facing_deg, 1), "min_fov_deg": 10, "max_fov_deg": 360}
+
+        async def fov_get(request):
+            return web.json_response(fov_state())
+
+        async def fov_set(request):
+            """{"fov_deg": N}: the worker counts as FACING a hazard inside +-N/2 deg of their heading."""
+            try:
+                fov = float((await request.json())["fov_deg"])
+            except (ValueError, TypeError, KeyError) as e:
+                return web.json_response({"error": f"send {{\"fov_deg\": number}} ({e})"}, status=400)
+            self.pipe.facing_deg = min(max(fov, 10.0), 360.0) / 2
+            print(f"[fov] facing = within +-{self.pipe.facing_deg:g} deg of the heading "
+                  f"(field of view {2 * self.pipe.facing_deg:g} deg, set from the overlay page)", flush=True)
+            return web.json_response(fov_state())
+
+        def motion_state():
+            return {"cone_deg": round(2 * self.pipe.approach_cone_deg, 1), "min_speed_mps": self.pipe.min_speed_mps}
+
+        async def motion_get(request):
+            return web.json_response(motion_state())
+
+        async def motion_set(request):
+            """{"cone_deg": N, "min_speed_mps": v}: a hazard faster than v is HEADING AT the worker when the
+            worker is within +-N/2 deg of its direction of travel."""
+            try:
+                d = await request.json()
+                if d.get("cone_deg") is not None:
+                    self.pipe.approach_cone_deg = min(max(float(d["cone_deg"]), 10.0), 360.0) / 2
+                if d.get("min_speed_mps") is not None:
+                    self.pipe.min_speed_mps = min(max(float(d["min_speed_mps"]), 0.0), 5.0)
+            except (ValueError, TypeError, AttributeError) as e:
+                return web.json_response({"error": f"send {{\"cone_deg\": n, \"min_speed_mps\": v}} ({e})"}, status=400)
+            print(f"[motion] heading at the worker = within +-{self.pipe.approach_cone_deg:g} deg of the car's travel, "
+                  f"faster than {self.pipe.min_speed_mps:g} m/s (set from the overlay page)", flush=True)
+            return web.json_response(motion_state())
+
+        app.router.add_get("/motion", motion_get)
+        app.router.add_post("/motion", motion_set)
+        app.router.add_get("/fov", fov_get)
+        app.router.add_post("/fov", fov_set)
+        app.router.add_get("/buzz", buzz_get)
+        app.router.add_post("/buzz", buzz_set)
         app.router.add_get("/window", reopen)
         app.router.add_get("/zero", zero)
         app.router.add_get("/overlay", page)
@@ -278,35 +345,131 @@ class PhoneHazardModel:
 OVERLAY_HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SightLine overlay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#f5f6f8;--text:#1c2027;--btn:#fff;--line:#d0d5dd}
-:root[data-theme=dark]{--bg:#111418;--text:#e6e8eb;--btn:#1a1e24;--line:#2b313a}
-body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif;display:flex;flex-direction:column;height:100vh}
-#bar{display:flex;flex-wrap:wrap;gap:8px;padding:8px 12px;align-items:center}
-button{font:inherit;padding:.35rem .8rem;border:1px solid var(--line);border-radius:6px;background:var(--btn);color:var(--text);cursor:pointer}
-#msg{color:#98a2b3}
-#v{flex:1;min-height:0;display:flex;justify-content:center}
-img{max-width:100%;max-height:100%;object-fit:contain;background:#000}
+/* Colours and fonts from the SightLine pitch deck (same as the control page on port 8765) */
+:root{color-scheme:light;--tape-y:#FFCC4D;--tape-d:#292F33;--yellow:#FACC15;--amber:#FFBF00;--ink:#09090B;
+ --bg:#F4F4F5;--card:#FFFFFF;--card2:#FAFAFA;--text:#18181B;--muted:#52525B;--line:#E4E4E7;--field:#FFFFFF;
+ --heading:'Space Grotesk','Segoe UI',system-ui,sans-serif;--body:'Inter','Segoe UI',system-ui,sans-serif}
+:root[data-theme=dark]{color-scheme:dark;--bg:#393939;--card:#27272A;--card2:#1F1F22;--text:#FAFAFA;--muted:#A1A1AA;--line:#52525B;--field:#18181B}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 var(--body);display:flex;flex-direction:column;height:100vh}
+.tape{flex:none;height:8px;background:repeating-linear-gradient(-45deg,var(--tape-y) 0 12px,var(--tape-d) 12px 24px)}
+.layout{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:14px;padding:14px}
+.stage{min-height:0;display:flex;flex-direction:column;gap:10px}
+.stagehead{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.tag{display:inline-block;background:var(--yellow);color:var(--ink);font:700 .72rem var(--heading);letter-spacing:.08em;text-transform:uppercase;padding:.28rem .6rem;border-radius:6px}
+#msg{color:var(--muted);font-weight:500}
+#v{flex:1;min-height:0;display:flex;justify-content:center;align-items:center;background:#09090B;border-radius:14px;overflow:hidden}
+img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+aside{min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding-right:2px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+.card h3{margin:0 0 .25rem;font:700 1rem var(--heading)}
+.hint{margin:0 0 .7rem;color:var(--muted);font-size:.85rem}
+.btns{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px}
+.btns.two{grid-template-columns:1fr 1fr}
+button{font:600 .85rem var(--heading);padding:.55rem .5rem;border:1px solid var(--line);border-radius:9px;background:var(--card2);color:var(--text);cursor:pointer}
+button:hover{border-color:var(--yellow)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+button.primary{grid-column:1 / -1;background:var(--yellow);border-color:var(--yellow);color:var(--ink);font-size:.95rem;padding:.7rem}
+button.primary:hover{background:var(--amber)}
+kbd{font:600 .72rem ui-monospace,Consolas,monospace;padding:.05rem .3rem;border-radius:4px;border:1px solid currentColor;opacity:.6;margin-left:.25rem}
+.range{display:flex;align-items:center;gap:10px}
+.range input{flex:1;accent-color:#EAB308}
+.val{min-width:3.4em;text-align:right;font:700 1.05rem var(--heading);font-variant-numeric:tabular-nums}
+.row{display:flex;align-items:center;gap:8px;margin-top:.6rem;flex-wrap:wrap}
+input[type=number],select{font:inherit;padding:.4rem .5rem;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--text)}
+input[type=number]{width:5em}
+select{flex:1;min-width:0}
+#buzz{display:none}
+.switch{display:flex;align-items:center;gap:10px;font:700 .95rem var(--heading);cursor:pointer}
+.switch input{width:2.6rem;height:1.4rem;appearance:none;border-radius:999px;background:var(--line);position:relative;cursor:pointer;margin:0;flex:none}
+.switch input::after{content:"";position:absolute;top:3px;left:3px;width:calc(1.4rem - 6px);height:calc(1.4rem - 6px);border-radius:50%;background:#fff;transition:left .15s}
+.switch input:checked{background:#16A34A}
+.switch input:checked::after{left:calc(100% - 1.4rem + 3px)}
+@media (max-width:900px){body{height:auto}.layout{grid-template-columns:1fr}#v{min-height:55vh}aside{overflow:visible}}
 </style></head><body>
-<div id="bar">
- <button data-a="zero" title="worker faces +x (toward marker 1)">Zero heading (z)</button>
- <button data-a="left">Head +15 (a)</button><button data-a="right">Head -15 (d)</button>
- <button data-a="freeze">Freeze calibration (f)</button><button data-a="save">Save calibration (s)</button>
- <span id="msg">Waiting for the phone: open the server's https link on it and tap Start streaming.</span>
+<div class="tape" aria-hidden="true"></div>
+<div class="layout">
+ <div class="stage">
+  <div class="stagehead"><span class="tag">Live overlay</span><span id="msg" role="status">Waiting for the phone: open the server's https link on it and tap Start streaming.</span></div>
+  <div id="v"><img id="img" alt="Camera view with the floor grid, worker heading and hazards drawn on top"></div>
+ </div>
+ <aside aria-label="Tuning">
+  <section class="card">
+   <h3>Line up the heading</h3>
+   <p class="hint">Stand the worker facing marker 1 (+x), then press Zero. Nudge with the turn buttons if the arrow drifts.</p>
+   <div class="btns two">
+    <button class="primary" data-a="zero" title="worker faces +x (toward marker 1)">Zero heading<kbd>Z</kbd></button>
+    <button data-a="left" title="turn the heading 15 degrees left">&#8634; Left 15&deg;<kbd>A</kbd></button>
+    <button data-a="right" title="turn the heading 15 degrees right">Right 15&deg; &#8635;<kbd>D</kbd></button>
+    <button data-a="freeze" title="stop adjusting the heading calibration">Freeze<kbd>F</kbd></button>
+    <button data-a="save" title="save the calibration to disk">Save<kbd>S</kbd></button>
+   </div>
+  </section>
+  <section class="card" id="fov" title="Worker's field of view: a hazard inside it counts as FACING">
+   <h3><label for="fovIn">Worker's field of view</label></h3>
+   <p class="hint">A hazard inside this angle counts as seen.</p>
+   <div class="range"><input type="range" id="fovIn" min="10" max="360" step="5" value="60"><span class="val" id="fovVal">60&deg;</span></div>
+  </section>
+  <section class="card" id="motion" title="The car is HEADING AT the worker when the worker is inside this cone around the car's direction of travel and the car is faster than the minimum speed">
+   <h3><label for="coneIn">When is the car heading at them?</label></h3>
+   <p class="hint">The worker must be inside this cone around the car's direction of travel, and the car faster than the minimum speed.</p>
+   <div class="range"><input type="range" id="coneIn" min="10" max="360" step="5" value="60"><span class="val" id="coneVal">60&deg;</span></div>
+   <div class="row"><label for="minSpeed">Minimum speed</label><input type="number" id="minSpeed" min="0" max="5" step="0.05" value="0.1"> m/s</div>
+  </section>
+  <section class="card" id="buzz" title="Buzz the phone while the car is heading at the worker and the worker is not facing it">
+   <h3>Phone buzz</h3>
+   <p class="hint">Buzzes while the car is heading at the worker and they haven't looked at it.</p>
+   <label class="switch"><input type="checkbox" id="buzzOn"> Buzz the phone</label>
+   <div class="row">
+    <select id="buzzMode" aria-label="Buzz style" title="continuous: buzzes (sound + vibration) for exactly as long as the worker isn't facing it (app 1.1+). pulse: one notification every N s (older apps)">
+     <option value="continuous">Continuous</option><option value="pulse-warn">Pulse, short</option><option value="pulse-alert">Pulse, long</option></select>
+    <span id="buzzEveryBox">every <input type="number" id="buzzEvery" min="0.2" max="600" step="0.5" aria-label="Seconds between pulses"> s</span>
+   </div>
+  </section>
+ </aside>
 </div>
-<div id="v"><img id="img" alt="overlay"></div>
 <script>
 const $=id=>document.getElementById(id);
 const t=new URLSearchParams(location.search).get('theme');
 if(t)document.documentElement.setAttribute('data-theme',t);
 addEventListener('message',e=>{if(e.data&&e.data.type==='sightline-theme')document.documentElement.setAttribute('data-theme',e.data.value)});
 async function act(a){const r=await fetch('/control/'+a,{method:'POST'});$('msg').textContent=(await r.text()).trim()}
-document.querySelectorAll('button').forEach(b=>b.onclick=()=>act(b.dataset.a));
-addEventListener('keydown',e=>{const m={z:'zero',a:'left',d:'right',f:'freeze',s:'save'}[e.key];if(m)act(m)});
+document.querySelectorAll('button[data-a]').forEach(b=>b.onclick=()=>act(b.dataset.a));
+function showBuzz(s){if(!s.available)return;$('buzz').style.display='block';$('buzzOn').checked=s.enabled;
+ if(document.activeElement!==$('buzzEvery'))$('buzzEvery').value=s.every_s;
+ if(s.mode)$('buzzMode').value=s.mode==='continuous'?'continuous':'pulse-'+s.level;
+ $('buzzEveryBox').style.display=s.mode==='pulse'?'inline':'none';
+ if(s.error)$('msg').textContent=s.error}
+async function setBuzz(body){const r=await fetch('/buzz',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ const s=await r.json();showBuzz(s);if(r.ok)$('msg').textContent=`Buzz ${s.enabled?'on':'off'}, `+(s.mode==='continuous'?'continuous':`pulse every ${s.every_s} s`)}
+$('buzzOn').onchange=()=>setBuzz({enabled:$('buzzOn').checked});
+$('buzzMode').onchange=()=>{const v=$('buzzMode').value;setBuzz(v==='continuous'?{mode:'continuous'}:{mode:'pulse',level:v.slice(6)})};
+$('buzzEvery').onchange=()=>{const v=parseFloat($('buzzEvery').value);if(v>0)setBuzz({every_s:v})};
+fetch('/buzz').then(r=>r.json()).then(showBuzz).catch(()=>{});
+function showFov(s){if(s.fov_deg==null)return;$('fovIn').value=s.fov_deg;$('fovVal').textContent=Math.round(s.fov_deg)+'°'}
+let fovTimer=null;
+$('fovIn').oninput=()=>{$('fovVal').textContent=$('fovIn').value+'°';clearTimeout(fovTimer);
+ fovTimer=setTimeout(async()=>{const r=await fetch('/fov',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({fov_deg:+$('fovIn').value})});const s=await r.json();showFov(s);
+  if(r.ok)$('msg').textContent=`Facing = within ±${s.fov_deg/2}° of the heading`},150)};
+fetch('/fov').then(r=>r.json()).then(showFov).catch(()=>{});
+function showMotion(s){if(s.cone_deg==null)return;$('coneIn').value=s.cone_deg;$('coneVal').textContent=Math.round(s.cone_deg)+'°';
+ if(document.activeElement!==$('minSpeed'))$('minSpeed').value=s.min_speed_mps}
+async function setMotion(body){const r=await fetch('/motion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ const s=await r.json();showMotion(s);if(r.ok)$('msg').textContent=`Heading at worker = within ±${s.cone_deg/2}° of the car's travel, faster than ${s.min_speed_mps} m/s`}
+let coneTimer=null;
+$('coneIn').oninput=()=>{$('coneVal').textContent=$('coneIn').value+'°';clearTimeout(coneTimer);
+ coneTimer=setTimeout(()=>setMotion({cone_deg:+$('coneIn').value}),150)};
+$('minSpeed').onchange=()=>{const v=parseFloat($('minSpeed').value);if(v>=0)setMotion({min_speed_mps:v})};
+fetch('/motion').then(r=>r.json()).then(showMotion).catch(()=>{});
+addEventListener('keydown',e=>{if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;const m={z:'zero',a:'left',d:'right',f:'freeze',s:'save'}[e.key];if(m)act(m)});
 const img=$('img');
 function connect(){img.src='/overlay.mjpg?'+Date.now()}
-img.onload=()=>{$('msg').textContent=''};
-img.onerror=()=>{$('msg').textContent='No overlay yet: waiting for the phone...';setTimeout(connect,2000)};
+img.onload=()=>{img.style.visibility='visible';$('msg').textContent='Live'};
+img.onerror=()=>{img.style.visibility='hidden';$('msg').textContent='No overlay yet: waiting for the phone...';setTimeout(connect,2000)};
 connect();
 </script></body></html>
 """
@@ -331,14 +494,28 @@ def main() -> None:
                    help="ArUco id taped on the toy car (repeatable), or 'auto' = any non-floor marker; "
                         "its centre is the car's position")
     g.add_argument("--car-label", default="toy car", help="label for marker-tagged vehicles")
+    g.add_argument("--worker-marker", type=int, metavar="ID",
+                   help="ArUco id taped on top of the worker's hardhat: that person is the worker, with a fixed id "
+                        "(the marker itself stands in when YOLO misses the person); not a floor or car marker")
     g.add_argument("--blob-fallback", action="store_true",
                    help="follow the dark blob under the car while its marker can't be read (dark car, light floor)")
     g.add_argument("--imgsz", type=int, default=640)
+    g.add_argument("--device", default=None,
+                   help="where YOLO runs: 0 = first NVIDIA GPU, cpu = processor; default: the GPU if PyTorch can use one")
+    g.add_argument("--marker-width", type=int, default=960,
+                   help="search ArUco markers on a copy this many pixels wide, then refine on the full frame "
+                        "(~3x faster at 1080p); 0 = full resolution (try it if small/far markers are missed)")
     g.add_argument("--vehicles", nargs="+", default=sorted(VEHICLE_LABELS), help="COCO classes treated as vehicles")
     g.add_argument("--tags-only", action="store_true",
                    help="show only the worker, floor markers and --car-marker tags (YOLO detects people only)")
     g.add_argument("--facing-deg", type=float, default=30.0,
-                   help="worker counts as FACING the car when |relative angle| <= this")
+                   help="worker counts as FACING the car when |relative angle| <= this (half the field of view; "
+                        "the overlay page's Field of view slider changes it live)")
+    g.add_argument("--approach-deg", type=float, default=30.0,
+                   help="the car is HEADING AT the worker when |approach angle| <= this (half the car heading cone; "
+                        "the overlay page's Car heading cone slider changes it live)")
+    g.add_argument("--min-speed", type=float, default=0.1,
+                   help="m/s; a slower car counts as stopped (never heading at anyone)")
     g.add_argument("--no-track", action="store_true", help="detection only, no ByteTrack IDs")
     g.add_argument("--layout", help="floor_layout.json: calibrate live from floor markers")
     g.add_argument("--calib", help="floor_calib.json saved by check_floor / run_vision (fixed calibration)")
@@ -347,10 +524,14 @@ def main() -> None:
     g.add_argument("--print-every", type=float, default=1.0, help="console summary interval (s), 0 = off")
     g.add_argument("--window", action="store_true", help="also show the overlay in an OpenCV window (default: web page at /overlay)")
     g.add_argument("--mqtt", metavar="HOST[:PORT]", help="also publish each message on sightline/vision/hazards")
-    g.add_argument("--buzz", nargs="?", const="http://localhost:8765", metavar="URL",
-                   help="buzz the phone through the phone-alert server (default http://localhost:8765) while the "
-                        "worker is not facing a hazard, every --buzz-every seconds, only if a phone is connected")
-    g.add_argument("--buzz-every", type=float, default=5.0, help="seconds between buzzes")
+    g.add_argument("--buzz", nargs="?", const="http://127.0.0.1:8765", metavar="URL",
+                   help="buzz the phone through the phone-alert server (default http://127.0.0.1:8765) while the "
+                        "worker is not facing a hazard (see --buzz-mode)")
+    g.add_argument("--buzz-mode", choices=["continuous", "pulse"], default="continuous",
+                   help="continuous: the app buzzes until the worker faces the hazard (app 1.1+); "
+                        "pulse: one notification every --buzz-every seconds (older apps). Changeable on the overlay page")
+    g.add_argument("--buzz-every", type=float, default=1.0,
+                   help="pulse mode: seconds between buzzes (also adjustable on the overlay page)")
     g.add_argument("--alert-token", help="the phone-alert server's --token, if it has one")
     m = ap.add_argument_group("worker heading (Muse S)")
     m.add_argument("--muse", nargs="?", const="muse", metavar="SOURCE",
@@ -382,12 +563,15 @@ def main() -> None:
     layout = FloorLayout.load(args.layout) if args.layout else None
     fm = FloorMap.load(args.calib) if args.calib else None
     det = Detector(args.model, args.conf, args.imgsz, not args.no_track, [] if args.tags_only else args.vehicles,
-                   vehicle_conf=args.vehicle_conf)
+                   vehicle_conf=args.vehicle_conf, device=args.device)
     auto = "auto" in args.car_marker
     tags = {int(i): args.car_label for i in args.car_marker if i != "auto"}
     pipe = VisionPipeline(det, layout, fm, args.head_yaw, hazard_markers=tags,
                           any_marker_label=args.car_label if auto else None,
-                          tags_only=args.tags_only, facing_deg=args.facing_deg, blob_fallback=args.blob_fallback)
+                          tags_only=args.tags_only, facing_deg=args.facing_deg, blob_fallback=args.blob_fallback,
+                          worker_marker=args.worker_marker,
+                          marker_max_width=args.marker_width or None,
+                          approach_cone_deg=args.approach_deg, min_speed_mps=args.min_speed)
     heading = None
     if args.muse == "dashboard":
         from vision.dashboard_heading import DashboardHeading
@@ -402,7 +586,7 @@ def main() -> None:
     buzzer = None
     if args.buzz:
         from vision.buzz import PhoneBuzzer
-        buzzer = PhoneBuzzer(args.buzz, args.buzz_every, args.alert_token)
+        buzzer = PhoneBuzzer(args.buzz, args.buzz_every, args.alert_token, mode=args.buzz_mode)
     model = PhoneHazardModel(pipe, window=args.window, save_path=args.save, layout_path=args.layout,
                              print_every_s=args.print_every, hub=hub, buzzer=buzzer)
 
@@ -415,6 +599,12 @@ def main() -> None:
         ssl_ctx.load_cert_chain(cert, key)
     scheme = "http" if args.no_https else "https"
     print(f"\nmodel: {model.name}")
+    import torch
+    gpu = torch.cuda.is_available()
+    dev = args.device if args.device is not None else ("0" if gpu else "cpu")
+    print(f"YOLO on: {'GPU ' + torch.cuda.get_device_name(0) if dev != 'cpu' and gpu else 'CPU'}"
+          + ("" if gpu else " (PyTorch has no CUDA: install the CUDA build to use the GPU)")
+          + f" | markers searched at {args.marker_width or 'full'} px wide")
     print(f"floor: {'saved calibration ' + args.calib if fm else 'live from ' + args.layout if layout else 'none (pixels only)'}")
     print(f"open on the phone (same Wi-Fi):  {scheme}://{ip}:{args.port}")
     print(f"raw stream + boxes on this PC:   {scheme}://localhost:{args.port}/view")
@@ -422,12 +612,16 @@ def main() -> None:
     print(f"overlay page (Vision tab):       {scheme}://localhost:{args.port}/overlay")
     print(f"vehicles: YOLO {sorted(det.vehicle_labels)} >= {det.vehicle_conf}"
           + (f", tagged {args.car_label} = marker {args.car_marker}" if tags or auto else ""))
+    print("worker: " + (f"the person with hardhat marker {args.worker_marker}" if args.worker_marker is not None
+                        else "the most confident tracked person"))
     print("heading: " + (f"{'dashboard at ' + args.dashboard_url if args.muse == 'dashboard' else 'Muse (' + args.muse + ')'}; re-zero facing +x: z key or {scheme}://localhost:{args.port}/zero"
                          if heading else "manual, a / d keys"))
     if args.mqtt:
         print(f"mqtt: {HazardHub.TOPIC} on {args.mqtt}")
     if buzzer:
-        print(f"buzz: every {args.buzz_every:g} s while the worker is not facing a hazard, via {args.buzz} (needs a phone connected)")
+        how = "continuously" if buzzer.mode == "continuous" else f"every {buzzer.every_s:g} s"
+        print(f"buzz: {how} while the car is heading at the worker and not faced, via {args.buzz} (needs a phone connected); "
+              "change it on the overlay page")
     print(f"status:                          {scheme}://localhost:{args.port}/status\n")
     app = server.create_app(model, args.view_fps)
     hub.attach(app)

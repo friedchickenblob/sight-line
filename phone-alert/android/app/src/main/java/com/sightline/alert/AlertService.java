@@ -22,7 +22,9 @@ import java.net.URLEncoder;
 
 /**
  * Foreground service that holds one Server-Sent Events connection to the laptop and turns each
- * "alert" event into a notification plus a buzz. It reconnects on its own (the hotspot drops).
+ * "alert" event into a notification plus a buzz, and "buzz" events into a continuous buzz
+ * (sound + vibration) that runs until "buzz off" or its hold time runs out (Buzzer).
+ * It reconnects on its own (the hotspot drops).
  */
 public class AlertService extends Service {
     static final String ACTION_STOP = "com.sightline.alert.STOP";
@@ -104,6 +106,7 @@ public class AlertService extends Service {
             try { c.disconnect(); } catch (Exception ignored) { }
         }
         if (worker != null) worker.interrupt();
+        Buzzer.off();
         releaseLocks();
         setStatus("Stopped");
     }
@@ -203,6 +206,17 @@ public class AlertService extends Service {
                 if (!boot.equals(prefs.boot())) prefs.setLast(0, boot);   // server restarted: its ids start over
                 gotHello = true;
                 setStatus("Connected");
+            } else if ("buzz".equals(event)) {
+                // Continuous buzz from the vision server: {"on": true, "hold_s": 1.5, "title", "message"}
+                // while the worker isn't facing a hazard (refreshed), {"on": false} the moment they are.
+                if (o.optBoolean("on", false)) {
+                    String title = o.optString("title", "Look at the hazard");
+                    String message = o.optString("message", "");
+                    if (!Buzzer.isActive()) lastAlert = title + (message.isEmpty() ? "" : ": " + message);
+                    Buzzer.on(this, title, message, (long) (o.optDouble("hold_s", 1.5) * 1000));
+                } else {
+                    Buzzer.off();
+                }
             } else if ("alert".equals(event)) {
                 long id = o.optLong("id", 0);
                 if (id <= prefs.lastId()) return;                          // already shown
