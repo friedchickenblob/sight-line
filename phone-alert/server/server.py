@@ -17,6 +17,15 @@ How it reaches the phone: the Android app keeps one HTTP connection open to /eve
 that the phone can open a TCP connection to this laptop. Works on a Windows Mobile
 Hotspot (the laptop is usually 192.168.137.1) and on a phone hotspot (laptop joins it).
 
+Continuous buzz (the vision server's "worker isn't facing the hazard" signal):
+
+    POST /buzz  {"v": 1, "on": true, "hold_s": 1.5, "title": "Look at the toy car", "message": "..."}
+    POST /buzz  {"v": 1, "on": false}
+
+"on" starts the app's sound + vibration and must be repeated (sooner than hold_s) to keep it going:
+the app stops by itself once hold_s passes without one. "off" stops it at once. Buzz messages go
+straight to the connected phones and are never stored or replayed (a late buzz is a wrong buzz).
+
 Message shape follows the repo convention (CLAUDE.md): JSON, snake_case, "v": 1.
     title      str, default "Alert"
     message    str, default ""
@@ -75,6 +84,29 @@ def clean_message(data: dict) -> dict:
     }
 
 
+BUZZ_MAX_HOLD_S = 10.0
+
+
+def clean_buzz(data: dict) -> dict:
+    """Validate a /buzz payload. Raises ValueError."""
+    if not isinstance(data, dict):
+        raise ValueError("payload must be a JSON object")
+    v = data.get("v", SCHEMA_VERSION)
+    if v != SCHEMA_VERSION:
+        raise ValueError(f"unsupported schema version {v!r} (this server speaks v{SCHEMA_VERSION})")
+    if not isinstance(data.get("on"), bool):
+        raise ValueError('"on" must be true or false')
+    try:
+        hold = float(data.get("hold_s", 1.5))
+    except (TypeError, ValueError):
+        raise ValueError("hold_s must be a number") from None
+    if not 0 < hold <= BUZZ_MAX_HOLD_S:
+        raise ValueError(f"hold_s must be in (0, {BUZZ_MAX_HOLD_S:g}]")
+    return {"on": data["on"], "hold_s": hold,
+            "title": str(data.get("title") or "Look at the hazard")[:120],
+            "message": str(data.get("message") or "")[:500]}
+
+
 class Client:
     def __init__(self, name: str, ip: str):
         self.name, self.ip = name, ip
@@ -91,6 +123,7 @@ class Hub:
         self.history: deque = deque(maxlen=HISTORY)
         self.next_id = 1
         self.boot = secrets.token_hex(4)   # changes on every server start so phones reset their last-seen id
+        self.buzz: Optional[dict] = None   # last buzz state; "on" counts only until its hold time runs out
 
     def add_client(self, name: str, ip: str, last_id: Optional[int]) -> Client:
         c = Client(name, ip)
@@ -102,6 +135,9 @@ class Hub:
                     ttl = ev["ttl_s"] if ev["ttl_s"] is not None else REPLAY_WINDOW_S
                     if ev["id"] > last_id and now - ev["sent_at"] <= min(ttl, REPLAY_WINDOW_S):
                         c.q.put_nowait(ev)
+            b = self.buzz                      # a phone joining mid-buzz starts buzzing for what's left of it
+            if b and b["on"] and now < b["sent_at"] + b["hold_s"]:
+                c.q.put_nowait({**b, "hold_s": round(b["sent_at"] + b["hold_s"] - now, 3)})
         return c
 
     def remove_client(self, c: Client) -> None:
@@ -124,10 +160,29 @@ class Hub:
             ev = {**ev, "delivered_to": delivered}
         return ev
 
+    def set_buzz(self, msg: dict) -> int:
+        """Push a buzz on/off straight to every connected phone (not stored for replay)."""
+        with self.lock:
+            ev = {"kind": "buzz", "sent_at": time.time(), **msg}
+            self.buzz = ev
+            delivered = 0
+            for c in self.clients:
+                try:
+                    c.q.put_nowait(ev)
+                    delivered += 1
+                except queue.Full:
+                    pass
+        return delivered
+
+    def buzzing(self) -> bool:
+        b = self.buzz
+        return bool(b and b["on"] and time.time() < b["sent_at"] + b["hold_s"])
+
     def snapshot(self) -> dict:
         now = time.time()
         with self.lock:
             return {
+                "buzzing": self.buzzing(),
                 "clients": [{"name": c.name, "ip": c.ip, "connected_s": round(now - c.connected_at, 1),
                              "last_seen_s": round(now - c.last_seen, 1)} for c in self.clients],
                 "recent": [{k: ev[k] for k in ("id", "sent_at", "title", "message", "level", "source")}
@@ -491,6 +546,16 @@ def create_app(hub: Optional[Hub] = None, token: Optional[str] = None, port: int
         ev = hub.broadcast(msg, source="http")
         return jsonify(ok=True, id=ev["id"], delivered_to=ev["delivered_to"])
 
+    @app.post("/buzz")
+    def buzz():
+        if not authorised():
+            return jsonify(ok=False, error="bad or missing token"), 401
+        try:
+            msg = clean_buzz(request.get_json(silent=True) or {})
+        except ValueError as e:
+            return jsonify(ok=False, error=str(e)), 400
+        return jsonify(ok=True, on=msg["on"], delivered_to=hub.set_buzz(msg))
+
     @app.get("/events")
     def events():
         if not authorised():
@@ -514,6 +579,10 @@ def create_app(hub: Optional[Hub] = None, token: Optional[str] = None, port: int
                         yield f"event: ping\ndata: {int(time.time())}\n\n"
                         continue
                     client.last_seen = time.time()
+                    if ev.get("kind") == "buzz":       # no id: buzzes don't move the phone's replay position
+                        data = {"v": SCHEMA_VERSION, **{k: ev[k] for k in ("on", "hold_s", "title", "message")}}
+                        yield f"event: buzz\ndata: {json.dumps(data)}\n\n"
+                        continue
                     payload = {"v": SCHEMA_VERSION, "id": ev["id"], "title": ev["title"], "message": ev["message"],
                                "level": ev["level"], "sent_at": ev["sent_at"]}
                     yield f"id: {ev['id']}\nevent: alert\ndata: {json.dumps(payload)}\n\n"

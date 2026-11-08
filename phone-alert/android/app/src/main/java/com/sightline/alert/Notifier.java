@@ -18,6 +18,7 @@ final class Notifier {
     static final String CH_INFO = "info_v1";
     static final String CH_WARN = "warn_v1";
     static final String CH_ALERT = "alert_v1";
+    static final String CH_BUZZ = "buzz_v1";
 
     private static final long[] BUZZ_WARN = {0, 300, 150, 300};
     private static final long[] BUZZ_ALERT = {0, 500, 150, 500, 150, 900};
@@ -53,6 +54,13 @@ final class Notifier {
         alert.setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI, attrs);
         alert.setBypassDnd(false);
         nm.createNotificationChannel(alert);
+
+        // The continuous buzz plays its own sound and vibration (Buzzer), so its notification is silent.
+        NotificationChannel buzz = new NotificationChannel(CH_BUZZ, "Hazard buzz", NotificationManager.IMPORTANCE_HIGH);
+        buzz.setDescription("Shown while the phone buzzes because the worker isn't facing a hazard");
+        buzz.setSound(null, null);
+        buzz.enableVibration(false);
+        nm.createNotificationChannel(buzz);
     }
 
     static PendingIntent openApp(Context c) {
