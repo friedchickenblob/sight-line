@@ -29,6 +29,10 @@ class HazardReading:
     distance_m: float | None = None
     bearing_deg: float | None = None           # floor frame: 0 = +x, CCW +
     rel_bearing_deg: float | None = None       # relative to head yaw: 0 ahead, +90 left
+    # motion (filled in by VisionPipeline, which keeps the per-track history)
+    speed_mps: float | None = None
+    travel_deg: float | None = None            # direction it's moving: 0 = +x, CCW +
+    approach_deg: float | None = None          # travel direction vs. direction to the worker: 0 = straight at them
 
 
 @dataclass

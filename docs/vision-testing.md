@@ -172,11 +172,61 @@ and allow Python through Windows Firewall.
 .venv\Scripts\python -m vision.run_phone --layout floor_layout.json --car-marker 42 --tags-only
 ```
 
-**Buzz the phone.** `--buzz` sends a notification through the phone-alert server (`http://localhost:8765`, or
-`--buzz URL`) every 5 s (`--buzz-every`) while a worker is in view and a hazard shows **NOT FACING**. It only
-sends if a phone app is connected to that server (otherwise the terminal says so once), and never when the
-verdict is blank (heading not ready or lost). Start `python phone-alert/server/server.py` first; add
-`--alert-token` if that server has a `--token`.
+**Hardhat marker (`--worker-marker ID`).** Tape a marker (any id that isn't a floor or car marker) flat on top
+of the worker's hardhat. The person whose box contains it is the worker, always with that id, even when
+someone else walks in; if YOLO misses the person from above, the marker itself stands in for them. Between
+sightings the nearest person to where it was last seen is kept.
+
+```powershell
+.venv\Scripts\python -m vision.run_phone --layout floor_layout.json --car-marker 42 --worker-marker 10 --tags-only
+```
+
+**Raised tags.** A tag on the car's roof or the hardhat is above the floor, so the floor map places it too far
+from the point under the camera. Add `camera_height_m`, `nadir_m` (the floor point straight under the lens)
+and `tag_heights_m` (`{"42": 0.06, "10": 1.75}`, tag id → height in metres) to `floor_layout.json` and both are
+moved down to their floor point (see `vision/floor.py`). Without them, positions are uncorrected.
+
+**When it alerts: car heading at the worker AND not looked at.** Two checks, both the same "inside a cone"
+test:
+
+- **Facing** (the worker): the car is within ± field-of-view/2 of the worker's head direction (the
+  **Field of view** slider, `--facing-deg`).
+- **Heading at the worker** (the car): the car's velocity is estimated from its tag's floor positions over the last
+  0.5 s (a line fit, so tag jitter doesn't read as motion). The **approach angle** is the angle between where the
+  car is going and the direction from the car to the worker: 0 = straight at them, ±90 = crossing, 180 = driving
+  away. It's heading at the worker when |approach angle| ≤ car-heading-cone/2 (the **Car heading cone** slider,
+  default 60°, `--approach-deg 30`) and it's faster than the minimum speed (**min … m/s** box, default 0.1,
+  `--min-speed`); slower counts as stopped.
+
+The phone buzzes while both hold: heading at the worker and NOT FACING. A parked car, a car driving across or away,
+or a car the worker is watching never buzzes. The camera view draws the car's direction of travel as a cyan arrow
+(as far as it gets in 1 s), and the angle panel adds its speed, approach angle, HEADING AT WORKER / not, and the
+result: **ALERT: BUZZ** / no alert. Each hazard in `/hazards` gets `speed_mps`, `travel_deg`, `approach_deg`,
+`approaching` and `alert`. The cone and minimum speed are also at `GET`/`POST /motion` with
+`{"cone_deg": 60, "min_speed_mps": 0.1}`.
+
+**Buzz the phone.** `--buzz` buzzes the phone through the phone-alert server (`http://127.0.0.1:8765`, or
+`--buzz URL`) while a worker is in view and a hazard shows **NOT FACING**, and never when the verdict is
+blank (heading not ready or lost). Start `python phone-alert/server/server.py` first; add `--alert-token` if
+that server has a `--token`.
+
+- **continuous** (default, `--buzz-mode continuous`, needs the phone app **1.1+**): the phone plays its alarm
+  sound on loop and vibrates from the moment the worker stops facing the hazard until the moment they face
+  it. The vision server sends "buzz on" (refreshed every 0.5 s) and "buzz off" on the phone-alert server's
+  `POST /buzz`; measured laptop-side delay from the verdict changing to the phone being told: ~20 ms. Fail-safes:
+  no frames for 0.5 s (stream stopped) switches it off, and the app stops by itself 1.5 s after the last "on"
+  if the laptop or Wi-Fi goes away.
+- **pulse** (`--buzz-mode pulse`, for older apps): one notification every `--buzz-every` s (default 1). A pulse
+  can't be cancelled once it starts, so it ends up to its own length after the worker looks: short (0.75 s)
+  or long (2.2 s).
+
+The overlay page (and the Vision tab) has a **Buzz** switch, a **continuous / pulse, short / pulse, long**
+choice and, for pulse, an **every … s** box. They change it while it runs, no restart (also
+`GET`/`POST /buzz` with `{"enabled": true, "mode": "continuous"}`), and reset to the command-line values when
+the server restarts.
+
+Use `127.0.0.1`, not `localhost`, for `--buzz URL` on Windows: `localhost` tries IPv6 first and every request
+waited ~2 s for that to fail (the vision server now rewrites it). That was the "backlog" in the old buzzes.
 
 **Angle panel** (top right of the overlay window): a top-down dial in the floor frame (+x right,
 +y up) with the worker's heading (yellow arrow), the direction from the worker to the car (orange
@@ -184,6 +234,12 @@ arrow) and the facing cone (shaded). Below it: worker heading, car bearing, rela
 to the worker's left), and **FACING** (green) when |relative angle| ≤ `--facing-deg` (default 30),
 else **NOT FACING** (red). Each hazard in `/hazards` also gets `"facing": true / false / null`.
 Without `--muse`, the heading is the one you set with `a` / `d`.
+
+**Field of view slider.** The overlay page (and the Vision tab) has a **Field of view** slider, 10–360°,
+default 60° (= 2 × `--facing-deg`). A hazard inside it counts as FACING; widen it if the worker sees the car
+out of the corner of their eye but gets buzzed anyway. It applies from the next frame (the shaded cone on the
+dial follows it) and resets to `--facing-deg` when the server restarts. Also `GET`/`POST /fov` with
+`{"fov_deg": 90}`.
 
 ## Level 3: worker heading from the Muse S
 
