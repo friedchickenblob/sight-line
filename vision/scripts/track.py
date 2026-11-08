@@ -43,6 +43,41 @@ MACHINE_CLS, WORKER_CLS = {2, 7}, {0}  # COCO; after fine-tune use {1}, {0}
 MACHINE_MARKER_ID = 20
 RELOCK_AFTER_S = 0.5
 WORKER_BOX_H_M = 1.3  # height of a person's box centre seen from above (guide page 9)
+# Blob fallback: marker 20 is only ~20 px wide at 1280x720, so compression often makes it unreadable.
+# The chair is the only big black shape on the floor, so between marker sightings we follow that blob.
+BLOB_V_MAX = 45            # HSV value below this counts as "black chair"
+BLOB_AREA_PX = (15000, 90000)
+BLOB_MAX_JUMP_PX = 200     # blob centre must be this close to where the chair was last seen
+BLOB_MAX_GAP_S = 30.0      # stop trusting the blob this long after the last marker sighting
+RELOCK_BLOB_S = 1.0        # chair not found near its last spot for this long: take the biggest blob anywhere
+# One worker (demo assumption): report a single worker track with a fixed id, from the hardhat marker
+# when it's readable, else the YOLO person box nearest the last worker position.
+WORKER_MARKER_ID = 10
+WORKER_ID = 10
+WORKER_MAX_JUMP_M = 0.8    # per second since the last fix: a person box farther than this is someone else
+
+
+def chair_blob(frame, near_px=None):
+    """Centre (u, v) of the big dark blob nearest near_px, or None.
+    near_px=None (chair lost, e.g. carried back to the start line): the biggest chair-sized blob anywhere."""
+    v = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)[..., 2]
+    mask = (v < BLOB_V_MAX).astype(np.uint8) * 255
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((15, 15), np.uint8))
+    n, _, st, cen = cv2.connectedComponentsWithStats(mask)
+    best = None
+    for i in range(1, n):
+        if not BLOB_AREA_PX[0] <= st[i, cv2.CC_STAT_AREA] <= BLOB_AREA_PX[1]:
+            continue
+        if near_px is None:
+            d = -st[i, cv2.CC_STAT_AREA]  # biggest wins
+        else:
+            d = np.linalg.norm(cen[i] - near_px)
+            if d > BLOB_MAX_JUMP_PX:
+                continue
+        if best is None or d < best[0]:
+            best = (d, cen[i])
+    return None if best is None else best[1]
 
 
 class Velocity:
@@ -152,6 +187,9 @@ def run(source, out_csv=None, machine_by="marker"):
             print(f"floor markers {missing} never seen in the clip: using the placeholder")
             H_, fitting = floor_map.PLACEHOLDER_H, False
     reported_px, last_fit_t, n_fits = dict(last_px), None, 0
+    chair_px, marker_t, offset = None, -1e9, None  # last machine pixel position, last marker sighting
+    chair_t, worker_xy, worker_t = -1e9, None, -1e9
+    n_frames = n_marker = n_blob = n_hat = n_box = 0
     for i, (t, frame) in enumerate(frames(source)):
         found = floor_map.detect(frame)
         if fitting:
@@ -176,11 +214,26 @@ def run(source, out_csv=None, machine_by="marker"):
         machines, workers = [], []
         if machine_by == "marker":
             c = found.get(MACHINE_MARKER_ID)
+            px = None
             if c is not None:
-                (xm, ym), = to_floor(H_, [c.mean(axis=0)])
+                px = c.mean(axis=0)
+                blob = chair_blob(frame, px)
+                if blob is not None:
+                    offset = px - blob  # marker sits off the blob centre
+                marker_t, n_marker = t, n_marker + 1
+            elif chair_px is not None and t - marker_t <= BLOB_MAX_GAP_S:
+                lost = t - chair_t > RELOCK_BLOB_S  # chair moved too far to follow: look anywhere
+                blob = chair_blob(frame, None if lost else chair_px)
+                if blob is not None:
+                    px = blob + (offset if offset is not None else 0)
+                    n_blob += 1
+            if px is not None:
+                chair_px, chair_t = px, t
+                (xm, ym), = to_floor(H_, [px])
                 h = cfg.get("machine_marker_height_m", 0.0) if cfg else 0.0
                 xm, ym = floor_map.parallax_fix((xm, ym), h, cfg)
                 machines.append((MACHINE_MARKER_ID, xm, ym))
+            n_frames += 1
         classes = sorted(WORKER_CLS) if machine_by == "marker" else sorted(WORKER_CLS | MACHINE_CLS)
         # conf is low on purpose: ByteTrack uses weak boxes in its second matching pass
         r = model.track(frame, persist=True, tracker="bytetrack.yaml", conf=0.1, imgsz=640, verbose=False,
@@ -204,8 +257,32 @@ def run(source, out_csv=None, machine_by="marker"):
             v = vel.setdefault("machine", Velocity()).update(t, m[1], m[2])
             lock.seen(t, m[1], m[2], v)
             rows.append((m[0], "machine", m[1], m[2], v))
-        for tid, xm, ym in workers:
-            rows.append((tid, "worker", xm, ym, vel.setdefault(tid, Velocity()).update(t, xm, ym)))
+        if machine_by == "marker":  # single worker: hardhat marker first, else nearest person box
+            w = None
+            c = found.get(WORKER_MARKER_ID)
+            if c is not None:
+                (xm, ym), = to_floor(H_, [c.mean(axis=0)])
+                h = cfg.get("hardhat_marker_height_m", 1.6) if cfg else 1.6
+                w = floor_map.parallax_fix((xm, ym), h, cfg)
+                n_hat += 1
+            elif workers:
+                if worker_xy is None or t - worker_t > 2.0:
+                    near = workers  # no recent fix: take any person in the rig
+                else:
+                    reach = WORKER_MAX_JUMP_M * max(t - worker_t, 0.25)
+                    near = [p for p in workers if np.hypot(p[1] - worker_xy[0], p[2] - worker_xy[1]) <= reach]
+                if near:
+                    ref = worker_xy or near[0][1:]
+                    best = min(near, key=lambda p: np.hypot(p[1] - ref[0], p[2] - ref[1]))
+                    w = best[1:]
+                    n_box += 1
+            if w is not None:
+                worker_xy, worker_t = w, t
+                rows.append((WORKER_ID, "worker", w[0], w[1],
+                             vel.setdefault("worker", Velocity()).update(t, w[0], w[1])))
+        else:
+            for tid, xm, ym in workers:
+                rows.append((tid, "worker", xm, ym, vel.setdefault(tid, Velocity()).update(t, xm, ym)))
 
         for tid, cls, xm, ym, v in rows:
             vx, vy = v if v else (float("nan"), float("nan"))
@@ -215,6 +292,11 @@ def run(source, out_csv=None, machine_by="marker"):
                 print(f"{t:9.3f} {cls:7s} id={tid:<3} ({xm:5.2f},{ym:5.2f}) m  v=({vx:+.2f},{vy:+.2f}) m/s")
     if fitting:
         print(f"floor map refitted {n_fits} times")
+    if machine_by == "marker" and n_frames:
+        print(f"machine found in {100 * (n_marker + n_blob) / n_frames:.0f}% of frames "
+              f"(marker {100 * n_marker / n_frames:.0f}%, blob fallback {100 * n_blob / n_frames:.0f}%)")
+        print(f"worker found in {100 * (n_hat + n_box) / n_frames:.0f}% of frames "
+              f"(hardhat marker {100 * n_hat / n_frames:.0f}%, person box {100 * n_box / n_frames:.0f}%)")
 
 
 if __name__ == "__main__":
