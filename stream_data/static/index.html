@@ -3,97 +3,165 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>SightLine camera</title>
+  <meta name="theme-color" content="#27272A">
+  <title>SightLine · phone camera</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <style>
-    :root { --bg: #f5f6f8; --card: #fff; --text: #1c2027; --muted: #667085; --line: #e3e6eb;
-            --accent: #2a6fdb; --ok: #1f9d55; --bad: #d1495b; }
+    /* Colours, fonts and the hazard tape come from the SightLine pitch deck */
+    :root { color-scheme: light;
+            --tape-y: #FFCC4D; --tape-d: #292F33; --yellow: #FACC15; --amber: #FFBF00; --cream: #FFF2CC; --ink: #09090B;
+            --bg: #F4F4F5; --card: #FFFFFF; --card2: #FAFAFA; --text: #18181B; --muted: #52525B; --line: #E4E4E7; --head: #27272A;
+            --bad-bg: #FEE2E2; --bad-fg: #991B1B; --ok-bg: #DCFCE7; --ok-fg: #166534; --wait-bg: #FEF08A; --wait-fg: #854D0E;
+            --display: 'Oswald', 'Arial Narrow', Impact, sans-serif;
+            --heading: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+            --body: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
     @media (prefers-color-scheme: dark) {
-      :root { --bg: #111418; --card: #1a1e24; --text: #e6e8eb; --muted: #98a2b3; --line: #2b313a;
-              --accent: #5b93f0; --ok: #3fbf74; --bad: #ef6b7d; }
+      :root { color-scheme: dark; --bg: #393939; --card: #27272A; --card2: #1F1F22; --text: #FAFAFA; --muted: #A1A1AA;
+              --line: #52525B; --head: #09090B; }
     }
     * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--text);
-           font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-    main { max-width: 640px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
-    h1 { font-size: 18px; margin: 0; }
-    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
-    video { width: 100%; border-radius: 8px; background: #000; aspect-ratio: 16 / 9; object-fit: contain; }
-    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    select, button { font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
-                     background: var(--bg); color: var(--text); }
-    select { flex: 1 1 140px; min-width: 0; }
-    button { flex: 1 1 120px; }
-    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-    button:disabled { opacity: .45; }
-    .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 600;
-            background: var(--line); }
-    .pill.connected { background: var(--ok); color: #fff; }
-    .pill.failed, .pill.disconnected { background: var(--bad); color: #fff; }
-    dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; }
-    dt { color: var(--muted); }
-    dd { margin: 0; font-variant-numeric: tabular-nums; }
-    pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; max-height: 220px;
-          overflow-y: auto; color: var(--muted); }
-    .error { color: var(--bad); }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 var(--body);
+           padding-bottom: env(safe-area-inset-bottom); }
+    .tape { height: 10px; background: repeating-linear-gradient(-45deg, var(--tape-y) 0 14px, var(--tape-d) 14px 28px); }
+    header { background: var(--head); color: #fff; padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top));
+             display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .brand { display: flex; flex-direction: column; line-height: 1.05; }
+    .brand .mark { font: 600 26px/1 var(--display); letter-spacing: .06em; color: var(--amber); }
+    .brand .sub { font: 600 11px var(--heading); letter-spacing: .14em; text-transform: uppercase; color: var(--cream); opacity: .85; margin-top: 4px; }
+    main { max-width: 640px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+    h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; }
+    .tag { display: inline-block; background: var(--yellow); color: var(--ink); font: 700 11px var(--heading); letter-spacing: .08em;
+           text-transform: uppercase; padding: 4px 9px; border-radius: 6px; }
+    .stage { position: relative; }
+    video { width: 100%; border-radius: 12px; background: #09090B; aspect-ratio: 16 / 9; object-fit: contain; display: block; }
+    .stage .hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; text-align: center;
+                   color: #D4D4D8; font: 600 14px var(--heading); pointer-events: none; }
+    .stage.live .hint { display: none; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; font: 700 12px var(--heading);
+            letter-spacing: .06em; text-transform: uppercase; background: #3F3F46; color: #E4E4E7; white-space: nowrap; }
+    .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: .8; }
+    .pill.connected { background: var(--ok-bg); color: var(--ok-fg); }
+    .pill.connecting, .pill.new { background: var(--wait-bg); color: var(--wait-fg); }
+    .pill.failed, .pill.disconnected, .pill.closed { background: var(--bad-bg); color: var(--bad-fg); }
+    .actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: 12px; }
+    button { font: 700 17px var(--heading); padding: 15px 18px; border-radius: 12px; border: 1px solid var(--line);
+             background: var(--card2); color: var(--text); cursor: pointer; }
+    button.primary { background: var(--yellow); border-color: var(--yellow); color: var(--ink); }
+    button.primary:active { background: var(--amber); }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    button:focus-visible, select:focus-visible, summary:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
+    details { margin-top: 12px; border-top: 1px dashed var(--line); padding-top: 10px; }
+    summary { cursor: pointer; font: 600 14px var(--heading); color: var(--muted); padding: 4px 0; list-style-position: inside; }
+    .settings { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+    .settings label { display: grid; gap: 4px; font: 600 12px var(--heading); color: var(--muted); }
+    .settings label.wide { grid-column: 1 / -1; }
+    select { font: 500 15px var(--body); padding: 11px 10px; border-radius: 10px; border: 1px solid var(--line);
+             background: var(--card2); color: var(--text); width: 100%; min-width: 0; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+    .stat { background: var(--card2); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; min-width: 0; }
+    .stat dt { font: 600 12px var(--heading); color: var(--muted); }
+    .stat dd { margin: 2px 0 0; font: 600 15px var(--heading); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+    .stat.wide { grid-column: 1 / -1; }
+    dl { margin: 0; }
+    pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; font: 12px/1.45 ui-monospace, Consolas, monospace;
+          max-height: 220px; overflow-y: auto; color: var(--muted); background: var(--card2); border: 1px solid var(--line);
+          border-radius: 10px; padding: 10px; }
+    .error { color: var(--bad-fg); background: var(--bad-bg); border-radius: 12px; padding: 12px 14px; font-weight: 600; margin-top: 12px; }
+    .card.error { margin-top: 0; border: 0; }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
-<main>
-  <div class="row" style="justify-content: space-between">
-    <h1>SightLine · phone camera</h1>
-    <span id="state" class="pill">idle</span>
-  </div>
+<div class="tape" aria-hidden="true"></div>
+<header>
+  <div class="brand"><span class="mark">SIGHTLINE</span><span class="sub">Phone camera</span></div>
+  <span id="state" class="pill" role="status">idle</span>
+</header>
+<h1>SightLine · phone camera</h1>
 
+<main>
   <div id="insecure" class="card error" hidden>
     This page isn't on HTTPS, so Chrome won't give it the camera. Open the
     <b>https://</b> address the server printed.
   </div>
 
   <div class="card">
-    <video id="preview" autoplay muted playsinline></video>
-    <div class="row" style="margin-top: 10px">
-      <select id="facing">
-        <option value="environment">Back camera</option>
-        <option value="user">Front camera</option>
-      </select>
-      <select id="size">
-        <option value="640x480">640 × 480</option>
-        <option value="1280x720" selected>1280 × 720</option>
-        <option value="1920x1080">1920 × 1080</option>
-      </select>
-      <select id="fps">
-        <option value="15">15 fps</option>
-        <option value="30" selected>30 fps</option>
-      </select>
-      <select id="quality" title="Locked keeps the resolution and bitrate you pick; the frame rate drops instead">
-        <option value="auto" selected>Quality: auto (smooth)</option>
-        <option value="2000">Locked · 2 Mbps</option>
-        <option value="4000">Locked · 4 Mbps</option>
-        <option value="8000">Locked · 8 Mbps</option>
-        <option value="16000">Locked · 16 Mbps</option>
-        <option value="30000">Locked · 30 Mbps</option>
-        <option value="max">Locked · max (all the Wi-Fi allows)</option>
-      </select>
+    <span class="tag">Overhead camera</span>
+    <p style="margin: 8px 0 12px; color: var(--muted)">Point the phone straight down at the floor rig, then tap <b>Start streaming</b>. Keep this page open.</p>
+    <div class="stage" id="stage">
+      <video id="preview" autoplay muted playsinline></video>
+      <div class="hint">Camera preview appears here</div>
     </div>
-    <div class="row" style="margin-top: 8px">
+    <div class="actions">
       <button id="start" class="primary">Start streaming</button>
       <button id="stop" disabled>Stop</button>
     </div>
     <div id="error" class="error" hidden></div>
+
+    <details>
+      <summary>Camera settings</summary>
+      <div class="settings">
+        <label>Camera
+          <select id="facing">
+            <option value="environment">Back camera</option>
+            <option value="user">Front camera</option>
+          </select>
+        </label>
+        <label>Frame rate
+          <select id="fps">
+            <option value="15">15 fps</option>
+            <option value="30" selected>30 fps</option>
+          </select>
+        </label>
+        <label>Resolution
+          <select id="size">
+            <option value="640x480">640 × 480</option>
+            <option value="1280x720" selected>1280 × 720</option>
+            <option value="1920x1080">1920 × 1080</option>
+          </select>
+        </label>
+        <label>Quality
+          <select id="quality" title="Locked keeps the resolution and bitrate you pick; the frame rate drops instead">
+            <option value="auto" selected>Auto (smooth)</option>
+            <option value="2000">Locked · 2 Mbps</option>
+            <option value="4000">Locked · 4 Mbps</option>
+            <option value="8000">Locked · 8 Mbps</option>
+            <option value="16000">Locked · 16 Mbps</option>
+            <option value="30000">Locked · 30 Mbps</option>
+            <option value="max">Locked · max (all the Wi-Fi allows)</option>
+          </select>
+        </label>
+      </div>
+    </details>
   </div>
 
   <div class="card">
-    <dl>
-      <dt>sending</dt><dd id="sending">–</dd>
-      <dt>limited by</dt><dd id="limited">–</dd>
-      <dt>model</dt><dd id="model">–</dd>
-      <dt>server latency</dt><dd id="latency">–</dd>
-      <dt>dropped</dt><dd id="dropped">–</dd>
+    <span class="tag">Connection</span>
+    <dl class="stats">
+      <div class="stat wide"><dt>Sending</dt><dd id="sending">–</dd></div>
+      <div class="stat"><dt>Limited by</dt><dd id="limited">–</dd></div>
+      <div class="stat"><dt>Model</dt><dd id="model">–</dd></div>
+      <div class="stat"><dt>Server latency</dt><dd id="latency">–</dd></div>
+      <div class="stat"><dt>Dropped</dt><dd id="dropped">–</dd></div>
     </dl>
-    <pre id="result">Model results appear here.</pre>
+    <details>
+      <summary>Model output</summary>
+      <pre id="result">Model results appear here.</pre>
+    </details>
   </div>
 </main>
 
 <script src="/static/client.js?v=3"></script>
+<script>
+  // Hide the "preview appears here" hint once the camera is showing.
+  (function () {
+    const v = document.getElementById("preview"), stage = document.getElementById("stage");
+    const sync = () => stage.classList.toggle("live", !!v.srcObject);
+    v.addEventListener("loadedmetadata", sync);
+    v.addEventListener("emptied", sync);
+  })();
+</script>
 </body>
 </html>

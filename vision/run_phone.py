@@ -345,52 +345,100 @@ class PhoneHazardModel:
 OVERLAY_HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SightLine overlay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#f5f6f8;--text:#1c2027;--btn:#fff;--line:#d0d5dd}
-:root[data-theme=dark]{--bg:#111418;--text:#e6e8eb;--btn:#1a1e24;--line:#2b313a}
-body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif;display:flex;flex-direction:column;height:100vh}
-#bar{display:flex;flex-wrap:wrap;gap:8px;padding:8px 12px;align-items:center}
-button{font:inherit;padding:.35rem .8rem;border:1px solid var(--line);border-radius:6px;background:var(--btn);color:var(--text);cursor:pointer}
-#msg{color:#98a2b3}
-#buzz{display:none;gap:6px;align-items:center;padding:2px 8px;border:1px solid var(--line);border-radius:6px}
-#fov,#motion{display:inline-flex;gap:6px;align-items:center;padding:2px 8px;border:1px solid var(--line);border-radius:6px}
-#fov input,#motion input[type=range]{width:140px}
-#fovVal,#coneVal{min-width:3.2em;font-variant-numeric:tabular-nums}
-#minSpeed{width:4em;font:inherit;padding:.25rem .4rem;border:1px solid var(--line);border-radius:6px;background:var(--btn);color:var(--text)}
-#buzz input[type=number]{width:4.5em;font:inherit;padding:.25rem .4rem;border:1px solid var(--line);border-radius:6px;background:var(--btn);color:var(--text)}
-#v{flex:1;min-height:0;display:flex;justify-content:center}
-img{max-width:100%;max-height:100%;object-fit:contain;background:#000}
+/* Colours and fonts from the SightLine pitch deck (same as the control page on port 8765) */
+:root{color-scheme:light;--tape-y:#FFCC4D;--tape-d:#292F33;--yellow:#FACC15;--amber:#FFBF00;--ink:#09090B;
+ --bg:#F4F4F5;--card:#FFFFFF;--card2:#FAFAFA;--text:#18181B;--muted:#52525B;--line:#E4E4E7;--field:#FFFFFF;
+ --heading:'Space Grotesk','Segoe UI',system-ui,sans-serif;--body:'Inter','Segoe UI',system-ui,sans-serif}
+:root[data-theme=dark]{color-scheme:dark;--bg:#393939;--card:#27272A;--card2:#1F1F22;--text:#FAFAFA;--muted:#A1A1AA;--line:#52525B;--field:#18181B}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 var(--body);display:flex;flex-direction:column;height:100vh}
+.tape{flex:none;height:8px;background:repeating-linear-gradient(-45deg,var(--tape-y) 0 12px,var(--tape-d) 12px 24px)}
+.layout{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:14px;padding:14px}
+.stage{min-height:0;display:flex;flex-direction:column;gap:10px}
+.stagehead{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.tag{display:inline-block;background:var(--yellow);color:var(--ink);font:700 .72rem var(--heading);letter-spacing:.08em;text-transform:uppercase;padding:.28rem .6rem;border-radius:6px}
+#msg{color:var(--muted);font-weight:500}
+#v{flex:1;min-height:0;display:flex;justify-content:center;align-items:center;background:#09090B;border-radius:14px;overflow:hidden}
+img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+aside{min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding-right:2px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+.card h3{margin:0 0 .25rem;font:700 1rem var(--heading)}
+.hint{margin:0 0 .7rem;color:var(--muted);font-size:.85rem}
+.btns{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px}
+.btns.two{grid-template-columns:1fr 1fr}
+button{font:600 .85rem var(--heading);padding:.55rem .5rem;border:1px solid var(--line);border-radius:9px;background:var(--card2);color:var(--text);cursor:pointer}
+button:hover{border-color:var(--yellow)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+button.primary{grid-column:1 / -1;background:var(--yellow);border-color:var(--yellow);color:var(--ink);font-size:.95rem;padding:.7rem}
+button.primary:hover{background:var(--amber)}
+kbd{font:600 .72rem ui-monospace,Consolas,monospace;padding:.05rem .3rem;border-radius:4px;border:1px solid currentColor;opacity:.6;margin-left:.25rem}
+.range{display:flex;align-items:center;gap:10px}
+.range input{flex:1;accent-color:#EAB308}
+.val{min-width:3.4em;text-align:right;font:700 1.05rem var(--heading);font-variant-numeric:tabular-nums}
+.row{display:flex;align-items:center;gap:8px;margin-top:.6rem;flex-wrap:wrap}
+input[type=number],select{font:inherit;padding:.4rem .5rem;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--text)}
+input[type=number]{width:5em}
+select{flex:1;min-width:0}
+#buzz{display:none}
+.switch{display:flex;align-items:center;gap:10px;font:700 .95rem var(--heading);cursor:pointer}
+.switch input{width:2.6rem;height:1.4rem;appearance:none;border-radius:999px;background:var(--line);position:relative;cursor:pointer;margin:0;flex:none}
+.switch input::after{content:"";position:absolute;top:3px;left:3px;width:calc(1.4rem - 6px);height:calc(1.4rem - 6px);border-radius:50%;background:#fff;transition:left .15s}
+.switch input:checked{background:#16A34A}
+.switch input:checked::after{left:calc(100% - 1.4rem + 3px)}
+@media (max-width:900px){body{height:auto}.layout{grid-template-columns:1fr}#v{min-height:55vh}aside{overflow:visible}}
 </style></head><body>
-<div id="bar">
- <button data-a="zero" title="worker faces +x (toward marker 1)">Zero heading (z)</button>
- <button data-a="left">Head +15 (a)</button><button data-a="right">Head -15 (d)</button>
- <button data-a="freeze">Freeze calibration (f)</button><button data-a="save">Save calibration (s)</button>
- <span id="fov" title="Worker's field of view: a hazard inside it counts as FACING">
-  <label for="fovIn">Field of view</label>
-  <input type="range" id="fovIn" min="10" max="360" step="5" value="60"><span id="fovVal">60&deg;</span>
- </span>
- <span id="motion" title="The car is HEADING AT the worker when the worker is inside this cone around the car's direction of travel and the car is faster than the minimum speed">
-  <label for="coneIn">Car heading cone</label>
-  <input type="range" id="coneIn" min="10" max="360" step="5" value="60"><span id="coneVal">60&deg;</span>
-  min <input type="number" id="minSpeed" min="0" max="5" step="0.05" value="0.1"> m/s
- </span>
- <span id="buzz" title="Buzz the phone while the car is heading at the worker and the worker is not facing it">
-  <label><input type="checkbox" id="buzzOn"> Buzz</label>
-  <select id="buzzMode" title="continuous: buzzes (sound + vibration) for exactly as long as the worker isn't facing it (app 1.1+). pulse: one notification every N s (older apps)">
-   <option value="continuous">continuous</option><option value="pulse-warn">pulse, short</option><option value="pulse-alert">pulse, long</option></select>
-  <span id="buzzEveryBox">every <input type="number" id="buzzEvery" min="0.2" max="600" step="0.5"> s</span>
- </span>
- <span id="msg">Waiting for the phone: open the server's https link on it and tap Start streaming.</span>
+<div class="tape" aria-hidden="true"></div>
+<div class="layout">
+ <div class="stage">
+  <div class="stagehead"><span class="tag">Live overlay</span><span id="msg" role="status">Waiting for the phone: open the server's https link on it and tap Start streaming.</span></div>
+  <div id="v"><img id="img" alt="Camera view with the floor grid, worker heading and hazards drawn on top"></div>
+ </div>
+ <aside aria-label="Tuning">
+  <section class="card">
+   <h3>Line up the heading</h3>
+   <p class="hint">Stand the worker facing marker 1 (+x), then press Zero. Nudge with the turn buttons if the arrow drifts.</p>
+   <div class="btns two">
+    <button class="primary" data-a="zero" title="worker faces +x (toward marker 1)">Zero heading<kbd>Z</kbd></button>
+    <button data-a="left" title="turn the heading 15 degrees left">&#8634; Left 15&deg;<kbd>A</kbd></button>
+    <button data-a="right" title="turn the heading 15 degrees right">Right 15&deg; &#8635;<kbd>D</kbd></button>
+    <button data-a="freeze" title="stop adjusting the heading calibration">Freeze<kbd>F</kbd></button>
+    <button data-a="save" title="save the calibration to disk">Save<kbd>S</kbd></button>
+   </div>
+  </section>
+  <section class="card" id="fov" title="Worker's field of view: a hazard inside it counts as FACING">
+   <h3><label for="fovIn">Worker's field of view</label></h3>
+   <p class="hint">A hazard inside this angle counts as seen.</p>
+   <div class="range"><input type="range" id="fovIn" min="10" max="360" step="5" value="60"><span class="val" id="fovVal">60&deg;</span></div>
+  </section>
+  <section class="card" id="motion" title="The car is HEADING AT the worker when the worker is inside this cone around the car's direction of travel and the car is faster than the minimum speed">
+   <h3><label for="coneIn">When is the car heading at them?</label></h3>
+   <p class="hint">The worker must be inside this cone around the car's direction of travel, and the car faster than the minimum speed.</p>
+   <div class="range"><input type="range" id="coneIn" min="10" max="360" step="5" value="60"><span class="val" id="coneVal">60&deg;</span></div>
+   <div class="row"><label for="minSpeed">Minimum speed</label><input type="number" id="minSpeed" min="0" max="5" step="0.05" value="0.1"> m/s</div>
+  </section>
+  <section class="card" id="buzz" title="Buzz the phone while the car is heading at the worker and the worker is not facing it">
+   <h3>Phone buzz</h3>
+   <p class="hint">Buzzes while the car is heading at the worker and they haven't looked at it.</p>
+   <label class="switch"><input type="checkbox" id="buzzOn"> Buzz the phone</label>
+   <div class="row">
+    <select id="buzzMode" aria-label="Buzz style" title="continuous: buzzes (sound + vibration) for exactly as long as the worker isn't facing it (app 1.1+). pulse: one notification every N s (older apps)">
+     <option value="continuous">Continuous</option><option value="pulse-warn">Pulse, short</option><option value="pulse-alert">Pulse, long</option></select>
+    <span id="buzzEveryBox">every <input type="number" id="buzzEvery" min="0.2" max="600" step="0.5" aria-label="Seconds between pulses"> s</span>
+   </div>
+  </section>
+ </aside>
 </div>
-<div id="v"><img id="img" alt="overlay"></div>
 <script>
 const $=id=>document.getElementById(id);
 const t=new URLSearchParams(location.search).get('theme');
 if(t)document.documentElement.setAttribute('data-theme',t);
 addEventListener('message',e=>{if(e.data&&e.data.type==='sightline-theme')document.documentElement.setAttribute('data-theme',e.data.value)});
 async function act(a){const r=await fetch('/control/'+a,{method:'POST'});$('msg').textContent=(await r.text()).trim()}
-document.querySelectorAll('button').forEach(b=>b.onclick=()=>act(b.dataset.a));
-function showBuzz(s){if(!s.available)return;$('buzz').style.display='inline-flex';$('buzzOn').checked=s.enabled;
+document.querySelectorAll('button[data-a]').forEach(b=>b.onclick=()=>act(b.dataset.a));
+function showBuzz(s){if(!s.available)return;$('buzz').style.display='block';$('buzzOn').checked=s.enabled;
  if(document.activeElement!==$('buzzEvery'))$('buzzEvery').value=s.every_s;
  if(s.mode)$('buzzMode').value=s.mode==='continuous'?'continuous':'pulse-'+s.level;
  $('buzzEveryBox').style.display=s.mode==='pulse'?'inline':'none';
@@ -408,20 +456,20 @@ $('fovIn').oninput=()=>{$('fovVal').textContent=$('fovIn').value+'°';clearTimeo
   body:JSON.stringify({fov_deg:+$('fovIn').value})});const s=await r.json();showFov(s);
   if(r.ok)$('msg').textContent=`Facing = within ±${s.fov_deg/2}° of the heading`},150)};
 fetch('/fov').then(r=>r.json()).then(showFov).catch(()=>{});
-function showMotion(s){if(s.cone_deg==null)return;$('coneIn').value=s.cone_deg;$('coneVal').textContent=Math.round(s.cone_deg)+'\u00b0';
+function showMotion(s){if(s.cone_deg==null)return;$('coneIn').value=s.cone_deg;$('coneVal').textContent=Math.round(s.cone_deg)+'°';
  if(document.activeElement!==$('minSpeed'))$('minSpeed').value=s.min_speed_mps}
 async function setMotion(body){const r=await fetch('/motion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
- const s=await r.json();showMotion(s);if(r.ok)$('msg').textContent=`Heading at worker = within \u00b1${s.cone_deg/2}\u00b0 of the car's travel, faster than ${s.min_speed_mps} m/s`}
+ const s=await r.json();showMotion(s);if(r.ok)$('msg').textContent=`Heading at worker = within ±${s.cone_deg/2}° of the car's travel, faster than ${s.min_speed_mps} m/s`}
 let coneTimer=null;
-$('coneIn').oninput=()=>{$('coneVal').textContent=$('coneIn').value+'\u00b0';clearTimeout(coneTimer);
+$('coneIn').oninput=()=>{$('coneVal').textContent=$('coneIn').value+'°';clearTimeout(coneTimer);
  coneTimer=setTimeout(()=>setMotion({cone_deg:+$('coneIn').value}),150)};
 $('minSpeed').onchange=()=>{const v=parseFloat($('minSpeed').value);if(v>=0)setMotion({min_speed_mps:v})};
 fetch('/motion').then(r=>r.json()).then(showMotion).catch(()=>{});
-addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;const m={z:'zero',a:'left',d:'right',f:'freeze',s:'save'}[e.key];if(m)act(m)});
+addEventListener('keydown',e=>{if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;const m={z:'zero',a:'left',d:'right',f:'freeze',s:'save'}[e.key];if(m)act(m)});
 const img=$('img');
 function connect(){img.src='/overlay.mjpg?'+Date.now()}
-img.onload=()=>{$('msg').textContent=''};
-img.onerror=()=>{$('msg').textContent='No overlay yet: waiting for the phone...';setTimeout(connect,2000)};
+img.onload=()=>{img.style.visibility='visible';$('msg').textContent='Live'};
+img.onerror=()=>{img.style.visibility='hidden';$('msg').textContent='No overlay yet: waiting for the phone...';setTimeout(connect,2000)};
 connect();
 </script></body></html>
 """
