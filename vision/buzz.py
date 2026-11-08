@@ -9,10 +9,12 @@ Two modes (`mode`, changeable while it runs from the overlay page's Buzz control
 
 continuous (default, needs the phone-alert app 1.1+)
     POST /buzz {"on": true, "hold_s": HOLD_S} to the phone-alert server the moment the worker stops facing
-    the hazard, refreshed every REFRESH_S while it lasts, and {"on": false} the moment they face it. The app
-    plays its sound + vibration on loop in between, so start and stop are both as quick as a frame plus
-    the network (~0.1-0.3 s). Fail-safes: if frames stop arriving for FRAME_STALE_S the buzz is switched
-    off, and if the laptop goes silent the app stops by itself after HOLD_S.
+    the hazard, refreshed every REFRESH_S while it lasts, and {"on": false} once no frame has asked for it
+    for MIN_ON_S. The app plays its sound + vibration on loop in between. Starting is as quick as a frame
+    plus the network (~0.1-0.3 s); stopping waits MIN_ON_S, so a buzz always lasts at least that long and a
+    car tag that drops out for a few frames doesn't chop the sound into stop/start. Fail-safes: if frames
+    stop arriving for FRAME_STALE_S they no longer ask for it, and if the laptop goes silent the app stops
+    by itself after HOLD_S. Turning the buzz off or switching mode stops it at once.
 
 pulse (older apps)
     One notification (POST /notify) every `every_s` seconds, only if a phone is connected. The phone can't
@@ -51,6 +53,7 @@ class PhoneBuzzer:
     REFRESH_S = 0.5                        # continuous: resend "on" this often while it lasts
     HOLD_S = 1.5                           # continuous: the app stops by itself if no "on" for this long
     FRAME_STALE_S = 0.5                    # continuous: no frame for this long (stream stopped) -> off
+    MIN_ON_S = 1.0                         # continuous: keep buzzing until no frame asked for it for this long
 
     def __init__(self, url: str = DEFAULT_URL, every_s: float = 1.0, token: str | None = None,
                  clients=None, send=None, buzz_send=None, clock=time.monotonic, mode: str = "continuous"):
@@ -77,6 +80,7 @@ class PhoneBuzzer:
         self._want_on = False
         self._want_payload: dict | None = None
         self._last_frame = float("-inf")
+        self._last_asked = float("-inf")                    # last frame that wanted the buzz on
         self.buzzing = False                                # what the phone was last told
         threading.Thread(target=self._run_pulse, name="phone-buzzer", daemon=True).start()
         threading.Thread(target=self._run_continuous, name="phone-buzz-state", daemon=True).start()
@@ -127,6 +131,7 @@ class PhoneBuzzer:
             on = h is not None and self.mode == "continuous"
             if on:
                 self._want_payload = self.buzz_payload(h, self.HOLD_S)
+                self._last_asked = now
             if on != self._want_on:
                 self._want_on = on
                 self._wake.set()                            # send the change right away
@@ -162,7 +167,11 @@ class PhoneBuzzer:
             now = self.clock()
             with self._lock:
                 fresh = now - self._last_frame <= self.FRAME_STALE_S
-                want = self._want_on and fresh and self.enabled and self.mode == "continuous"
+                asked = self._want_on and fresh
+                # once on, keep it on until MIN_ON_S after the last frame that asked: a tag lost for a few
+                # frames doesn't stop and restart the sound, and every buzz lasts at least MIN_ON_S
+                holding = self.buzzing and now - self._last_asked < self.MIN_ON_S
+                want = (asked or holding) and self.enabled and self.mode == "continuous"
                 payload = self._want_payload
             try:
                 if want and (not self.buzzing or now - last_on >= self.REFRESH_S):

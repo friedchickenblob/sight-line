@@ -142,13 +142,32 @@ class Cont:
         return [p for p in self.sent if p["on"]]
 
 
-def test_continuous_starts_at_once_and_stops_at_once():
+def test_continuous_starts_at_once_and_stops_after_the_minimum_time():
     c = Cont()
     c.feed(msg(False, dist=1.2, rel=40.0))
     assert c.sent and c.sent[0]["on"] is True and c.sent[0]["hold_s"] == PhoneBuzzer.HOLD_S
     assert "Look at the toy car" == c.sent[0]["title"] and "left" in c.sent[0]["message"]
     assert c.b.buzzing
+    c.t = 0.1
+    c.feed(msg(True))                         # they looked right away: the buzz still lasts MIN_ON_S
+    assert c.b.buzzing and all(p["on"] for p in c.sent)
+    c.t = PhoneBuzzer.MIN_ON_S
     c.feed(msg(True))
+    assert c.sent[-1] == {"v": 1, "on": False} and not c.b.buzzing
+
+
+def test_continuous_does_not_stop_and_restart_when_the_car_tag_flickers():
+    """The bug: the car's tag seen for 5 frames, missed for 5, seen again... chopped the sound on and off."""
+    c = Cont()
+    frame = 1 / 30
+    for i in range(90):                       # 3 s of video at 30 fps
+        c.t = i * frame
+        c.b.update(msg(False) if (i // 5) % 2 == 0 else msg("none"))
+        _time.sleep(0.005)
+    _time.sleep(0.2)
+    assert c.b.buzzing and all(p["on"] for p in c.sent)     # never told the phone to stop
+    c.t = 89 * frame + PhoneBuzzer.MIN_ON_S                   # then the car is really gone for MIN_ON_S
+    c.feed(msg("none"))
     assert c.sent[-1] == {"v": 1, "on": False} and not c.b.buzzing
 
 
