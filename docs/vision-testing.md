@@ -211,8 +211,9 @@ blank (heading not ready or lost). Start `python phone-alert/server/server.py` f
 that server has a `--token`.
 
 - **continuous** (default, `--buzz-mode continuous`, needs the phone app **1.1+**): the phone plays its alarm
-  sound on loop and vibrates from the moment the worker stops facing the hazard until 1 s after the alert
-  last held (they face it, or the car's tag is lost). That 1 s means every buzz lasts at least a second and a
+  sound on loop and vibrates from the moment the worker stops facing the hazard until 0.5 s after the alert
+  last held (they face it, or the car's tag is lost), and then the app finishes the current peak of the sound
+  and stops in the quiet gap. So every buzz lasts at least half a second and a
   tag that drops out for a few frames doesn't chop the sound on and off. The vision server sends "buzz on" (refreshed every 0.5 s) and "buzz off" on the phone-alert server's
   `POST /buzz`; measured laptop-side delay from the verdict changing to the phone being told: ~20 ms. Fail-safes:
   no frames for 0.5 s (stream stopped) switches it off, and the app stops by itself 1.5 s after the last "on"

@@ -53,7 +53,8 @@ class PhoneBuzzer:
     REFRESH_S = 0.5                        # continuous: resend "on" this often while it lasts
     HOLD_S = 1.5                           # continuous: the app stops by itself if no "on" for this long
     FRAME_STALE_S = 0.5                    # continuous: no frame for this long (stream stopped) -> off
-    MIN_ON_S = 1.0                         # continuous: keep buzzing until no frame asked for it for this long
+    MIN_ON_S = 0.5                         # continuous: keep buzzing until no frame asked for it for this long
+                                           # (about one peak of the app's buzz sound; the app then stops at the next quiet point)
 
     def __init__(self, url: str = DEFAULT_URL, every_s: float = 1.0, token: str | None = None,
                  clients=None, send=None, buzz_send=None, clock=time.monotonic, mode: str = "continuous"):
