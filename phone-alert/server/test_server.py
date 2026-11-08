@@ -214,6 +214,15 @@ def wait_for(pred, timeout=6):
     return False
 
 
+def test_favicon_is_served_and_linked(s):
+    html = urllib.request.urlopen(s.base + "/").read().decode()
+    assert 'rel="icon"' in html and "/favicon.svg" in html
+    for path in ("/favicon.svg", "/favicon.ico"):
+        r = urllib.request.urlopen(s.base + path)
+        assert r.headers["Content-Type"].startswith("image/svg+xml")
+        assert r.read().decode().startswith("<svg")
+
+
 def test_page_has_both_tabs(s):
     html = urllib.request.urlopen(s.base + "/").read().decode()
     assert 'id="tab-notify"' in html and 'id="tab-dash"' in html and "/api/dashboard" in html

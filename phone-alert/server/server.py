@@ -288,6 +288,7 @@ PAGE = """<!doctype html>
 <html lang="en">
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SightLine control</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <script>
@@ -682,6 +683,37 @@ pollDash(); setInterval(pollDash, 3000);
 """
 
 
+# Browser-tab icon: a forklift with two ducks, one driving and one riding in the raised scoop
+FAVICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="13" fill="#27272A"/>
+  <!-- mast and the scoop, tilted to point up -->
+  <rect x="41" y="17" width="4" height="33" rx="1" fill="#A1A1AA"/>
+  <!-- duck riding in the scoop, facing out -->
+  <ellipse cx="51.5" cy="30.5" rx="5.6" ry="4.1" fill="#FACC15"/>
+  <circle cx="54.6" cy="23.6" r="3.5" fill="#FACC15"/>
+  <path d="M57.8 23.1 L61.2 24.3 L57.8 25.5 Z" fill="#FF8A00"/>
+  <circle cx="55.6" cy="22.8" r="0.9" fill="#09090B"/>
+  <path d="M44 39 L46 41 L60 27 L58 25 Z" fill="#E4E4E7"/>
+  <path d="M44 39 L44 28 L46 28 L46 41 Z" fill="#E4E4E7"/>
+  <!-- overhead guard -->
+  <path d="M11 35 V17 H31 V35" fill="none" stroke="#E4E4E7" stroke-width="2.6" stroke-linejoin="round"/>
+  <!-- duck driving -->
+  <ellipse cx="21" cy="31" rx="6.5" ry="4.6" fill="#FACC15"/>
+  <circle cx="25" cy="24.5" r="4" fill="#FACC15"/>
+  <path d="M28.6 24 L32.4 25.3 L28.6 26.6 Z" fill="#FF8A00"/>
+  <circle cx="26.2" cy="23.6" r="0.95" fill="#09090B"/>
+  <!-- body and counterweight -->
+  <path d="M6 35 H40 V48 H6 Q4 48 4 46 V37 Q4 35 6 35 Z" fill="#FF5F40"/>
+  <rect x="4" y="38" width="7" height="8" rx="1.5" fill="#C2410C"/>
+  <!-- wheels -->
+  <circle cx="14" cy="50" r="6.5" fill="#09090B"/>
+  <circle cx="14" cy="50" r="2.4" fill="#A1A1AA"/>
+  <circle cx="34" cy="50" r="6.5" fill="#09090B"/>
+  <circle cx="34" cy="50" r="2.4" fill="#A1A1AA"/>
+</svg>
+"""
+
+
 def create_app(hub: Optional[Hub] = None, token: Optional[str] = None, port: int = 8765,
                dashboard: Optional[DashboardLink] = None, vision_port: int = 8443) -> Flask:
     hub = hub or Hub()
@@ -698,6 +730,11 @@ def create_app(hub: Optional[Hub] = None, token: Optional[str] = None, port: int
     @app.get("/")
     def index():
         return Response(PAGE, mimetype="text/html")
+
+    @app.get("/favicon.svg")
+    @app.get("/favicon.ico")
+    def favicon():
+        return Response(FAVICON_SVG, mimetype="image/svg+xml", headers={"Cache-Control": "max-age=86400"})
 
     @app.get("/health")
     def health():
