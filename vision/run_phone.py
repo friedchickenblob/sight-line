@@ -128,7 +128,7 @@ class PhoneHazardModel:
 
     def __call__(self, img, t_s: float) -> dict:
         with self._lock:
-            res = self.pipe.process(img)
+            res = self.pipe.process(img, t_s)
             out = scene_to_dict(res, self.pipe.head_yaw_deg)
             out["t_s"] = t_s
             if self.hub is not None:
@@ -185,6 +185,8 @@ def main() -> None:
     g.add_argument("--car-marker", type=int, action="append", default=[], metavar="ID",
                    help="ArUco id taped on the toy car (repeatable); its centre is the car's position")
     g.add_argument("--car-label", default="toy car", help="label for marker-tagged vehicles")
+    g.add_argument("--blob-fallback", action="store_true",
+                   help="follow the dark blob under the car while its marker can't be read (dark car, light floor)")
     g.add_argument("--imgsz", type=int, default=640)
     g.add_argument("--vehicles", nargs="+", default=sorted(VEHICLE_LABELS), help="COCO classes treated as vehicles")
     g.add_argument("--no-track", action="store_true", help="detection only, no ByteTrack IDs")
@@ -215,7 +217,7 @@ def main() -> None:
     det = Detector(args.model, args.conf, args.imgsz, not args.no_track, args.vehicles,
                    vehicle_conf=args.vehicle_conf)
     tags = {i: args.car_label for i in args.car_marker}
-    pipe = VisionPipeline(det, layout, fm, args.head_yaw, hazard_markers=tags)
+    pipe = VisionPipeline(det, layout, fm, args.head_yaw, hazard_markers=tags, blob_fallback=args.blob_fallback)
     hub = HazardHub(args.mqtt)
     model = PhoneHazardModel(pipe, window=not args.no_window, save_path=args.save, layout_path=args.layout,
                              print_every_s=args.print_every, hub=hub)

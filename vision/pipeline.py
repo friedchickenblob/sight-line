@@ -12,10 +12,12 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from vision.blob import BlobFallback
 from vision.detector import Detection, Detector
 from vision.floor import FloorLayout, FloorMap, calibrate, detect_markers
 from vision.overlay import GREEN, ORANGE, RED, WHITE, YELLOW, draw_grid, draw_head_arrow, label, pt
 from vision.scene import Scene, WorkerSelector, build_scene
+from vision.tracks import TrackVelocity
 
 
 @dataclass
@@ -33,11 +35,15 @@ class VisionPipeline:
     floor_map       a saved calibration: used as-is (frozen) until unfrozen with a layout
     hazard_markers  {marker id: label}: an ArUco tag stuck on top of a vehicle (e.g. {4: "toy car"}).
                     Found every frame regardless of YOLO; its centre is the vehicle's floor point.
+    blob_fallback   follow the dark blob under a tagged vehicle while its tag can't be read
+                    (vision.blob; for a dark machine on a lighter floor). Off by default.
+    Every placed worker and hazard gets a floor velocity (vision.tracks) once it has ~0.2 s of history.
     """
 
     def __init__(self, detector: Detector, layout: FloorLayout | None = None,
                  floor_map: FloorMap | None = None, head_yaw_deg: float = 0.0,
-                 hazard_markers: dict[int, str] | None = None, dictionary: str | None = None):
+                 hazard_markers: dict[int, str] | None = None, dictionary: str | None = None,
+                 blob_fallback: bool = False):
         self.detector, self.layout, self.floor_map = detector, layout, floor_map
         self.frozen = floor_map is not None
         self.head_yaw_deg = head_yaw_deg
@@ -48,9 +54,14 @@ class VisionPipeline:
         if clash:
             raise ValueError(f"marker ids {sorted(clash)} are floor markers; tag the vehicle with another id")
         self.frames = 0
+        self.blob = BlobFallback() if blob_fallback else None
+        self.velocity = TrackVelocity()
 
-    def process(self, frame: np.ndarray) -> FrameResult:
+    def process(self, frame: np.ndarray, t_s: float | None = None) -> FrameResult:
+        """t_s: when the frame was captured (s): pylsl.local_clock() live, frame index / fps for a
+        video. Used for velocities; None = now."""
         self.frames += 1
+        t = time.perf_counter() if t_s is None else t_s
         found = None
         if self.layout is not None or self.hazard_markers:
             found = detect_markers(frame, self.dictionary)      # one search serves the floor and the tags
@@ -70,8 +81,17 @@ class VisionPipeline:
         infer_ms = (time.perf_counter() - t0) * 1000
         if self.hazard_markers:
             dets = add_marker_hazards(dets, found or {}, self.hazard_markers)
+            if self.blob is not None:
+                dets += self.blob.update(t, frame, found or {}, self.hazard_markers)
         scene = build_scene(dets, self.floor_map, self.head_yaw_deg, self.selector)
+        self._add_velocities(scene, t)
         return FrameResult(scene, status, infer_ms, self.frames)
+
+    def _add_velocities(self, scene: Scene, t: float) -> None:
+        placed = ([("worker", scene.worker)] if scene.worker else []) + [("hazard", r.hazard) for r in scene.hazards]
+        for role, p in placed:
+            if p.floor_xy is not None:
+                p.v_mps = self.velocity.update((role, p.det.track_id), t, p.floor_xy)
 
     # ------------------------------------------------------------- keyboard
     def nudge_yaw(self, step_deg: float) -> None:
@@ -155,6 +175,10 @@ def summary(scene: Scene) -> str:
     return s
 
 
+def _v(p):
+    return (None, None) if p.v_mps is None else (_r(p.v_mps[0]), _r(p.v_mps[1]))
+
+
 def _r(v, nd=3):
     return None if v is None else round(float(v), nd)
 
@@ -173,13 +197,17 @@ def scene_to_dict(res: FrameResult, head_yaw_deg: float | None) -> dict:
     worker = None
     if sc.worker:
         x, y = xy(sc.worker)
-        worker = {"track_id": sc.worker.det.track_id, "x_m": x, "y_m": y, "conf": _r(sc.worker.det.conf)}
+        vx, vy = _v(sc.worker)
+        worker = {"track_id": sc.worker.det.track_id, "x_m": x, "y_m": y, "vx_mps": vx, "vy_mps": vy,
+                  "conf": _r(sc.worker.det.conf)}
     hazards = []
     for r in sc.hazards:
         d = r.hazard.det
         x, y = xy(r.hazard)
+        vx, vy = _v(r.hazard)
         hazards.append({"track_id": d.track_id, "kind": d.kind, "label": d.label, "source": d.source,
-                        "conf": _r(d.conf), "x_m": x, "y_m": y, "distance_m": _r(r.distance_m),
+                        "conf": _r(d.conf), "x_m": x, "y_m": y, "vx_mps": vx, "vy_mps": vy,
+                        "distance_m": _r(r.distance_m),
                         "bearing_deg": _r(r.bearing_deg, 1), "rel_bearing_deg": _r(r.rel_bearing_deg, 1)})
 
     def box(det, text):

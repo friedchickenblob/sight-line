@@ -17,6 +17,7 @@ from vision.hazards import bearing_deg, distance_m, relative_bearing_deg
 class Placed:
     det: Detection
     floor_xy: tuple[float, float] | None       # None when there's no floor calibration
+    v_mps: tuple[float, float] | None = None   # floor-frame velocity (vision.tracks), None until known
 
 
 @dataclass

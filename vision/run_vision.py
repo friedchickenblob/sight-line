@@ -53,6 +53,8 @@ def main() -> None:
     ap.add_argument("--car-marker", type=int, action="append", default=[], metavar="ID",
                     help="ArUco id taped on the toy car (repeatable)")
     ap.add_argument("--car-label", default="toy car")
+    ap.add_argument("--blob-fallback", action="store_true",
+                    help="follow the dark blob under the car while its marker can't be read (dark car, light floor)")
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--vehicles", nargs="+", default=sorted(VEHICLE_LABELS), help="COCO classes treated as vehicles")
     ap.add_argument("--no-track", action="store_true", help="detection only, no ByteTrack IDs")
@@ -68,7 +70,8 @@ def main() -> None:
     det = Detector(args.model, args.conf, args.imgsz, not args.no_track, args.vehicles,
                    vehicle_conf=args.vehicle_conf)
     pipe = VisionPipeline(det, layout, fm, args.head_yaw,
-                          hazard_markers={i: args.car_label for i in args.car_marker})
+                          hazard_markers={i: args.car_label for i in args.car_marker},
+                          blob_fallback=args.blob_fallback)
     cap = open_source(args)
 
     cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
@@ -80,7 +83,9 @@ def main() -> None:
             print("end of video" if args.video else "camera read failed")
             break
 
-        res = pipe.process(frame)
+        # capture time for velocities: the frame's own time in a video, so a slow model doesn't change speeds
+        t_s = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000 if args.video else None
+        res = pipe.process(frame, t_s)
         now = time.perf_counter()
         fps = 0.9 * fps + 0.1 / max(now - t_prev, 1e-6) if fps else 1 / max(now - t_prev, 1e-6)
         t_prev = now
