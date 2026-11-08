@@ -4,6 +4,7 @@
     python -m vision.run_vision --layout floor_layout.json         # calibrate live from floor markers
     python -m vision.run_vision --calib floor_calib.json --layout floor_layout.json   # saved calibration
     python -m vision.run_vision --video clip.mp4                   # recorded video instead of the camera
+    python -m vision.run_vision --video clip.mp4 --layout floor_layout.json --car-marker 20 --worker-marker 10
 
 Without a floor calibration you get boxes, track IDs and ground points, but no metres or angles.
 With one, each vehicle gets distance, bearing (floor frame: 0 = +x, CCW +) and bearing relative
@@ -50,9 +51,13 @@ def main() -> None:
     ap.add_argument("--model", default="yolo26n.pt", help="YOLO weights (downloaded on first use)")
     ap.add_argument("--conf", type=float, default=0.35)
     ap.add_argument("--vehicle-conf", type=float, default=0.25, help="YOLO threshold for vehicles")
-    ap.add_argument("--car-marker", type=int, action="append", default=[], metavar="ID",
-                    help="ArUco id taped on the toy car (repeatable)")
+    ap.add_argument("--car-marker", action="append", default=[], metavar="ID|auto",
+                    help="ArUco id taped on the toy car (repeatable), or 'auto' = any non-floor marker")
     ap.add_argument("--car-label", default="toy car")
+    ap.add_argument("--worker-marker", type=int, metavar="ID",
+                    help="ArUco id on top of the worker's hardhat: that person is the worker")
+    ap.add_argument("--blob-fallback", action="store_true",
+                    help="follow the dark blob under the car while its marker can't be read (dark car, light floor)")
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--vehicles", nargs="+", default=sorted(VEHICLE_LABELS), help="COCO classes treated as vehicles")
     ap.add_argument("--no-track", action="store_true", help="detection only, no ByteTrack IDs")
@@ -68,7 +73,10 @@ def main() -> None:
     det = Detector(args.model, args.conf, args.imgsz, not args.no_track, args.vehicles,
                    vehicle_conf=args.vehicle_conf)
     pipe = VisionPipeline(det, layout, fm, args.head_yaw,
-                          hazard_markers={i: args.car_label for i in args.car_marker})
+                          hazard_markers={int(i): args.car_label for i in args.car_marker if i != "auto"},
+                          any_marker_label=args.car_label if "auto" in args.car_marker else None,
+                          worker_marker=args.worker_marker,
+                          blob_fallback=args.blob_fallback)
     cap = open_source(args)
 
     cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
@@ -80,7 +88,9 @@ def main() -> None:
             print("end of video" if args.video else "camera read failed")
             break
 
-        res = pipe.process(frame)
+        # capture time for velocities: the frame's own time in a video, so a slow model doesn't change speeds
+        t_s = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000 if args.video else None
+        res = pipe.process(frame, t_s)
         now = time.perf_counter()
         fps = 0.9 * fps + 0.1 / max(now - t_prev, 1e-6) if fps else 1 / max(now - t_prev, 1e-6)
         t_prev = now
