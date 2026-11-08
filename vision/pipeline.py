@@ -43,19 +43,22 @@ class VisionPipeline:
     heading         live head yaw source with .yaw_deg (None = not ready) and .status, e.g.
                     vision.head_yaw.MuseHeading. Then head_yaw_deg follows it every frame, and
                     nudge_yaw() adds an offset on top instead of setting the yaw.
+    worker_marker   ArUco id taped on top of the worker's hardhat: that person is the worker, with a
+                    fixed track id (scene.WorkerSelector). None = most confident tracked person.
     """
 
     def __init__(self, detector: Detector, layout: FloorLayout | None = None,
                  floor_map: FloorMap | None = None, head_yaw_deg: float = 0.0,
                  hazard_markers: dict[int, str] | None = None, dictionary: str | None = None,
                  any_marker_label: str | None = None, tags_only: bool = False, facing_deg: float = 30.0,
-                 heading=None):
+                 heading=None, worker_marker: int | None = None):
         self.tags_only, self.facing_deg = tags_only, facing_deg
         self.heading, self.yaw_offset_deg = heading, 0.0
         self.detector, self.layout, self.floor_map = detector, layout, floor_map
         self.frozen = floor_map is not None
         self.head_yaw_deg = head_yaw_deg
-        self.selector = WorkerSelector()
+        self.selector = WorkerSelector(worker_marker)
+        self.worker_marker = worker_marker
         self.hazard_markers = dict(hazard_markers or {})
         self.dictionary = dictionary or (layout.dictionary if layout else "DICT_4X4_50")
         clash = set(self.hazard_markers) & set(layout.markers if layout else ())
@@ -63,6 +66,9 @@ class VisionPipeline:
             raise ValueError(f"marker ids {sorted(clash)} are floor markers; tag the vehicle with another id")
         self.any_marker_label = any_marker_label
         self.seen_tags: set[int] = set()
+        if worker_marker is not None and (worker_marker in self.hazard_markers
+                                          or worker_marker in (layout.markers if layout else ())):
+            raise ValueError(f"marker {worker_marker} is the worker's hardhat; it can't be a floor or vehicle marker")
         self.frames = 0
 
     def process(self, frame: np.ndarray) -> FrameResult:
@@ -71,7 +77,8 @@ class VisionPipeline:
             y = self.heading.yaw_deg
             self.head_yaw_deg = None if y is None else (y + self.yaw_offset_deg + 180) % 360 - 180
         found = None
-        if self.layout is not None or self.hazard_markers or self.any_marker_label:
+        if self.layout is not None or self.hazard_markers or self.any_marker_label \
+                or self.worker_marker is not None:
             found = detect_markers(frame, self.dictionary)      # one search serves the floor and the tags
 
         status = "no floor map (pixels only)"
@@ -93,14 +100,14 @@ class VisionPipeline:
         if self.any_marker_label:
             floor_ids = set(self.layout.markers) if self.layout else set()
             for mid in (found or {}):
-                if mid not in floor_ids and mid not in tags:
+                if mid not in floor_ids and mid not in tags and mid != self.worker_marker:
                     tags[mid] = self.any_marker_label
                     if mid not in self.seen_tags:
                         self.seen_tags.add(mid)
                         print(f"vehicle tag: marker {mid} -> {self.any_marker_label}", flush=True)
         if tags:
             dets = add_marker_hazards(dets, found or {}, tags)
-        scene = build_scene(dets, self.floor_map, self.head_yaw_deg, self.selector)
+        scene = build_scene(dets, self.floor_map, self.head_yaw_deg, self.selector, found)
         return FrameResult(scene, status, infer_ms, self.frames, found or {})
 
     # ------------------------------------------------------------- keyboard

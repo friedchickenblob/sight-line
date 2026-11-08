@@ -14,6 +14,9 @@ go back to the phone over a WebRTC data channel and are printed once a second.
 
 HTTPS is required: Chrome only gives a page the camera on a secure origin. A
 self-signed certificate is generated on first run (cert.pem / key.pem, git-ignored).
+
+To run it inside another program (the head-motion dashboard does, with --phone), use
+PhoneStream: the same server on its own thread and event loop.
 """
 from __future__ import annotations
 
@@ -29,6 +32,7 @@ import threading
 import time
 from io import BytesIO
 from pathlib import Path
+from typing import Iterator
 
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription
@@ -157,6 +161,12 @@ class Session:
 
 # ----------------------------------------------------------------- viewer
 VIEW_MAX_WIDTH = 1280
+MJPEG_TYPE = "multipart/x-mixed-replace; boundary=frame"
+
+
+def mjpeg_part(jpg: bytes) -> bytes:
+    """One JPEG as a part of a multipart/x-mixed-replace (MJPEG) response."""
+    return b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n"
 
 
 def render_jpeg(frame, result: dict | None, quality: int = 80) -> bytes:
@@ -191,6 +201,11 @@ def render_jpeg(frame, result: dict | None, quality: int = 80) -> bytes:
 
 
 # ------------------------------------------------------------------------- app
+def status_of(app: web.Application) -> dict:
+    """What /status returns: the model's name and one entry per phone."""
+    return {"model": getattr(app[MODEL], "name", "custom"), "sessions": [s.status() for s in app[SESSIONS]]}
+
+
 def create_app(model, view_fps: float = 15.0) -> web.Application:
     app = web.Application()
     app[MODEL] = model
@@ -227,8 +242,7 @@ def create_app(model, view_fps: float = 15.0) -> web.Application:
         return web.json_response({"sdp": s.pc.localDescription.sdp, "type": s.pc.localDescription.type})
 
     async def status(request):
-        return web.json_response({"model": getattr(request.app[MODEL], "name", "custom"),
-                                  "sessions": [s.status() for s in request.app[SESSIONS]]})
+        return web.json_response(status_of(request.app))
 
     async def view(request):
         return web.FileResponse(HERE / "static" / "view.html")
@@ -239,8 +253,7 @@ def create_app(model, view_fps: float = 15.0) -> web.Application:
         s = next((x for x in request.app[SESSIONS] if x.id == sid), None)
         if s is None:
             raise web.HTTPNotFound(text=f"no phone {sid}")
-        resp = web.StreamResponse(headers={"Content-Type": "multipart/x-mixed-replace; boundary=frame",
-                                           "Cache-Control": "no-cache"})
+        resp = web.StreamResponse(headers={"Content-Type": MJPEG_TYPE, "Cache-Control": "no-cache"})
         await resp.prepare(request)
         loop, last, gap = asyncio.get_running_loop(), 0, 1.0 / request.app[VIEW_FPS]
         try:
@@ -256,8 +269,7 @@ def create_app(model, view_fps: float = 15.0) -> web.Application:
                     except Exception:
                         log.exception("could not draw frame for /view")
                         break
-                    await resp.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
-                                     + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n")
+                    await resp.write(mjpeg_part(jpg))
                 await asyncio.sleep(gap)
         except (ConnectionResetError, asyncio.CancelledError):
             pass                                       # the viewer closed the page
@@ -332,6 +344,122 @@ def ensure_cert(cert: Path, key: Path, ip: str, renew: bool = False):
     log.info("created self-signed certificate %s for %s", cert.name, ip)
 
 
+def https_context(ip: str, renew: bool = False) -> ssl.SSLContext:
+    """TLS for the server, with the self-signed certificate in this folder (made on first use)."""
+    cert, key = HERE / "cert.pem", HERE / "key.pem"
+    ensure_cert(cert, key, ip, renew)
+    ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    ctx.load_cert_chain(cert, key)
+    return ctx
+
+
+# ------------------------------------------------------- inside another program
+class PhoneStream:
+    """The whole stream server on a background thread with its own asyncio loop.
+
+    For programs that already have a main loop, like the head-motion dashboard (Flask):
+
+        phone = PhoneStream(load_model("null"), port=8443, ssl_context=https_context(lan_ip())).start()
+        phone.url            # what to open on the phone
+        phone.status()       # same as GET /status
+        phone.mjpeg(1)       # phone 1's video with boxes, as MJPEG parts (None if there is no phone 1)
+        phone.stop()
+
+    The phone still connects to this server directly (it needs HTTPS for the camera).
+    status() and mjpeg() can be called from any thread.
+    """
+
+    def __init__(self, model, host: str = "0.0.0.0", port: int = 8443, ssl_context: ssl.SSLContext | None = None,
+                 view_fps: float = 15.0):
+        self.model, self.host, self.port, self.ssl = model, host, port, ssl_context
+        self.view_fps = view_fps
+        self.app = create_app(model, view_fps)
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self.error: str | None = None
+        self._ready = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    @property
+    def url(self) -> str:
+        """The address to open on the phone (this computer's LAN IP)."""
+        return f"{'https' if self.ssl else 'http'}://{lan_ip()}:{self.port}"
+
+    @property
+    def running(self) -> bool:
+        return self.loop is not None and self.loop.is_running()
+
+    def start(self, timeout_s: float = 10.0) -> "PhoneStream":
+        """Start serving; raises RuntimeError if the port can't be opened."""
+        self._thread = threading.Thread(target=self._run, name="phone-stream", daemon=True)
+        self._thread.start()
+        if not self._ready.wait(timeout_s):
+            raise RuntimeError("phone stream server did not start")
+        if self.error:
+            raise RuntimeError(f"phone stream server could not start on port {self.port}: {self.error}")
+        return self
+
+    def _run(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        runner = web.AppRunner(self.app)
+        try:
+            loop.run_until_complete(runner.setup())
+            site = web.TCPSite(runner, self.host, self.port, ssl_context=self.ssl)
+            loop.run_until_complete(site.start())
+            self.port = runner.addresses[0][1]          # the real port when asked for port 0
+        except Exception as e:                           # e.g. the port is already in use
+            self.error = f"{type(e).__name__}: {e}"
+            loop.run_until_complete(runner.cleanup())
+            loop.close()
+            self._ready.set()
+            return
+        self.loop = loop
+        loop.call_soon(self._ready.set)
+        try:
+            loop.run_forever()
+        finally:
+            loop.run_until_complete(runner.cleanup())   # closes every phone's connection
+            rest = asyncio.all_tasks(loop)              # aiortc's own tasks: finish them, as web.run_app does
+            for t in rest:
+                t.cancel()
+            loop.run_until_complete(asyncio.gather(*rest, return_exceptions=True))
+            loop.close()
+
+    def _on_loop(self, fn, timeout_s: float = 2.0):
+        """Run fn() on the server's loop (where the sessions live) and return its result."""
+        async def call():
+            return fn()
+        return asyncio.run_coroutine_threadsafe(call(), self.loop).result(timeout_s)
+
+    def status(self) -> dict:
+        return self._on_loop(lambda: status_of(self.app))
+
+    def mjpeg(self, session_id: int) -> Iterator[bytes] | None:
+        """Phone `session_id`'s newest frames as MJPEG parts (send with MJPEG_TYPE), or None if unknown.
+
+        Runs on the caller's thread: JPEG encoding stays off the server's loop."""
+        s = self._on_loop(lambda: next((x for x in self.app[SESSIONS] if x.id == session_id), None))
+        if s is None:
+            return None
+
+        def frames():
+            last, gap = 0, 1.0 / self.view_fps
+            while self.running and not s.closed:
+                if s.frame_seq != last and s.frame is not None:
+                    last = s.frame_seq
+                    yield mjpeg_part(render_jpeg(s.frame, s.latest["result"] if s.latest else None))
+                time.sleep(gap)
+        return frames()
+
+    def stop(self):
+        if self.loop is not None and self.loop.is_running():
+            self.loop.call_soon_threadsafe(self.loop.stop)
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+
+    close = stop
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--host", default="0.0.0.0", help="0.0.0.0 = reachable from the phone on the same network")
@@ -354,12 +482,7 @@ def main():
         log.warning("Pillow is not installed: streaming works, but /view will stay blank. "
                     "Run `pip install -r requirements.txt` from the repo root.")
     ip = lan_ip()
-    ssl_ctx = None
-    if not args.no_https:
-        cert, key = HERE / "cert.pem", HERE / "key.pem"
-        ensure_cert(cert, key, ip, args.new_cert)
-        ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        ssl_ctx.load_cert_chain(cert, key)
+    ssl_ctx = None if args.no_https else https_context(ip, args.new_cert)
     scheme = "http" if args.no_https else "https"
     print(f"\nmodel: {getattr(model, 'name', args.model)}")
     print(f"open on the phone (same Wi-Fi):  {scheme}://{ip}:{args.port}")

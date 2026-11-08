@@ -42,6 +42,23 @@ so it's the one to check when debugging the model.
 Check it without a phone: `python -m pytest test_stream_server.py` (a Python WebRTC client
 plays the phone).
 
+## Run it together with the head-motion dashboard
+
+The Muse dashboard can run this server in the same process and show the phone's video
+next to the head yaw, from the `max/` folder:
+
+```powershell
+python dashboard/app.py --phone                          # Muse S + phone camera
+python dashboard/app.py --source synthetic:joint --phone # no headband
+python dashboard/app.py --phone --phone-model yolo       # with YOLO boxes on the video
+```
+
+Open <http://127.0.0.1:5000> on the computer and the printed `https://<IP>:8443` link on
+the phone. The dashboard's **Phone camera** card shows each phone's video, fps, model time
+and latest result. The phone page, `/view` and `/status` on port 8443 still work as above.
+Options: `--phone-port`, `--phone-model`, `--phone-view-fps`, `--phone-new-cert`.
+In your own program, use `PhoneStream` from `stream_server.py` the same way.
+
 ## Plug in your model
 
 Edit [model.py](model.py), or point `--model` at your own code:
