@@ -262,7 +262,7 @@ PAGE = """<!doctype html>
  .led{width:.55rem;height:.55rem;border-radius:50%;background:#64748b;display:inline-block}
  .led.on{background:#22c55e}
  #notify,.msg{max-width:640px;margin:1.2rem auto;padding:0 1rem}
- #dash{height:calc(100vh - 51px)} #dash iframe{width:100%;height:100%;border:0;display:block;background:var(--bg)}
+ #dash,#vision{height:calc(100vh - 51px)} #dash iframe,#vision iframe{width:100%;height:100%;border:0;display:block;background:var(--bg)}
  h2{font-size:1rem;margin:1.4rem 0 .4rem}
  input,select,button.send{font:inherit;padding:.5rem;border:1px solid var(--line);border-radius:6px;width:100%;color:var(--text);background:var(--field)}
  button.send{background:var(--btn);color:var(--btn-text);border:0;cursor:pointer;margin-top:.5rem} button.send:active{opacity:.8}
@@ -277,6 +277,7 @@ PAGE = """<!doctype html>
  <nav role="tablist" aria-label="Pages">
   <button role="tab" id="tab-notify" aria-selected="true" aria-controls="notify">Notifications</button>
   <button role="tab" id="tab-dash" aria-selected="false" aria-controls="dash">Dashboard <span class="led" id="led" title="dashboard status"></span></button>
+  <button role="tab" id="tab-vision" aria-selected="false" aria-controls="vision">Vision <span class="led" id="vled" title="vision server status"></span></button>
  </nav>
  <button id="theme" type="button" aria-label="Switch to dark mode" title="Switch light / dark">
   <svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
@@ -302,6 +303,11 @@ PAGE = """<!doctype html>
  <iframe id="dash-frame" title="Head-motion dashboard" hidden></iframe>
 </section>
 
+<section id="vision" role="tabpanel" aria-labelledby="tab-vision" hidden>
+ <div id="vision-msg" class="msg" hidden></div>
+ <iframe id="vision-frame" title="Vision overlay" hidden></iframe>
+</section>
+
 <script>
 const q = new URLSearchParams(location.search), token = q.get('token') || '';
 const H = token ? {'X-Token': token} : {};
@@ -310,8 +316,10 @@ const $ = id => document.getElementById(id);
 // ---- theme (light / dark): saved in this browser, and sent to the dashboard frame
 function currentTheme() { return document.documentElement.getAttribute('data-theme'); }
 function syncFrame() {
-  const f = $('dash-frame');
-  if (f.contentWindow) f.contentWindow.postMessage({type: 'sightline-theme', value: currentTheme()}, '*');
+  for (const id of ['dash-frame', 'vision-frame']) {
+    const f = $(id);
+    if (f.contentWindow) f.contentWindow.postMessage({type: 'sightline-theme', value: currentTheme()}, '*');
+  }
 }
 function applyTheme(t, save) {
   document.documentElement.setAttribute('data-theme', t);
@@ -321,20 +329,24 @@ function applyTheme(t, save) {
 }
 $('theme').onclick = () => applyTheme(currentTheme() === 'dark' ? 'light' : 'dark', true);
 $('dash-frame').addEventListener('load', syncFrame);
+$('vision-frame').addEventListener('load', syncFrame);
 applyTheme(currentTheme(), false);
 
 // ---- tabs (the chosen tab survives a reload through the URL hash)
 function show(name) {
-  for (const t of ['notify', 'dash']) {
+  for (const t of ['notify', 'dash', 'vision']) {
     $('tab-' + t).setAttribute('aria-selected', t === name);
     $(t).hidden = t !== name;
   }
-  history.replaceState(null, '', name === 'dash' ? '#dashboard' : location.pathname + location.search);
+  history.replaceState(null, '', name === 'dash' ? '#dashboard' : name === 'vision' ? '#vision' : location.pathname + location.search);
   if (name === 'dash') pollDash();
+  if (name === 'vision') pollVision();
 }
 $('tab-notify').onclick = () => show('notify');
 $('tab-dash').onclick = () => show('dash');
+$('tab-vision').onclick = () => show('vision');
 if (location.hash === '#dashboard') show('dash');
+if (location.hash === '#vision') show('vision');
 
 // ---- notifications tab
 fetch('/api/urls', {headers: H}).then(r => r.json()).then(d => {
@@ -389,14 +401,40 @@ async function pollDash() {
     dashMessage('<h2>The dashboard is not running</h2><p>Restart this server with <code>--dashboard</code>, or start it yourself:</p><pre>' + d.command + '</pre>');
   }
 }
+
+// ---- vision tab: vision.run_phone serves the overlay page over https on its own port, shown in a frame
+async function pollVision() {
+  let d;
+  try { d = await (await fetch('/api/vision', {headers: H})).json(); } catch (e) { return; }
+  const base = 'https://' + location.hostname + ':' + d.port + '/';
+  let up = false;
+  try { await fetch(base + 'status', {mode: 'no-cors'}); up = true; } catch (e) {}
+  $('vled').className = 'led' + (up ? ' on' : '');
+  const m = $('vision-msg');
+  if (up) {
+    if ($('vision-frame').dataset.base !== base) {
+      $('vision-frame').dataset.base = base;
+      $('vision-frame').src = base + 'overlay?theme=' + currentTheme();
+    }
+    $('vision-frame').hidden = false;
+    m.hidden = true;
+  } else {
+    m.innerHTML = '<h2>The vision server is not reachable</h2><p>Start it with <code>python -m vision.run_phone --layout floor_layout.json --car-marker 42 --tags-only --muse</code>. '
+      + 'Its page uses a self-signed certificate: open <a href="' + base + 'status" target="_blank">' + base + '</a> once in this browser, accept the warning, then come back.</p>';
+    m.hidden = false;
+    $('vision-frame').hidden = true;
+    delete $('vision-frame').dataset.base;
+  }
+}
 poll(); setInterval(poll, 2000);
+setInterval(() => { if (!$('vision').hidden) pollVision(); }, 3000);
 pollDash(); setInterval(pollDash, 3000);
 </script>
 """
 
 
 def create_app(hub: Optional[Hub] = None, token: Optional[str] = None, port: int = 8765,
-               dashboard: Optional[DashboardLink] = None) -> Flask:
+               dashboard: Optional[DashboardLink] = None, vision_port: int = 8443) -> Flask:
     hub = hub or Hub()
     dashboard = dashboard or DashboardLink()
     app = Flask(__name__)
@@ -432,6 +470,12 @@ def create_app(hub: Optional[Hub] = None, token: Optional[str] = None, port: int
         if not authorised():
             abort(401)
         return jsonify(dashboard.status())
+
+    @app.get("/api/vision")
+    def vision_status():
+        if not authorised():
+            abort(401)
+        return jsonify(port=vision_port)
 
     @app.post("/notify")
     def notify():
@@ -522,11 +566,13 @@ def main(argv=None) -> None:
                         'or --dashboard-args="--source synthetic:joint"')
     p.add_argument("--dashboard-lan", action="store_true",
                    help="let other devices open the dashboard (it can start/stop recordings: only on a network you trust)")
+    p.add_argument("--vision-port", type=int, default=8443,
+                   help="port of the vision server (python -m vision.run_phone) shown in the Vision tab")
     args = p.parse_args(argv)
 
     hub = Hub()
     dash = DashboardLink(args.dashboard_port, args.dashboard_script, shlex.split(args.dashboard_args), lan=args.dashboard_lan)
-    app = create_app(hub, args.token, args.port, dash)
+    app = create_app(hub, args.token, args.port, dash, args.vision_port)
     if args.dashboard:
         try:
             dash.start()

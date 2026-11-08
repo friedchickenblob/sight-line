@@ -1,7 +1,7 @@
 # Testing the floor mapping and hazard angles
 
 What exists so far in `vision/` and `stream_data/`, and how to test each piece. Not built yet:
-velocities / time to contact, MQTT output, and the Muse link; see [vision-hazard-plan.md](vision-hazard-plan.md).
+velocities / time to contact, and blending the Muse heading with the camera; see [vision-hazard-plan.md](vision-hazard-plan.md).
 
 | File | What it does |
 |---|---|
@@ -12,7 +12,9 @@ velocities / time to contact, MQTT output, and the Muse link; see [vision-hazard
 | `vision/detector.py` | YOLO26 (stock COCO weights) person + vehicle detection with ByteTrack track IDs |
 | `vision/scene.py` | Picks the worker, places everyone on the floor, distance / bearing / relative bearing of each vehicle |
 | `vision/run_vision.py` | Live app: detection + floor map + hazard angles on the camera feed |
-| `vision/overlay.py` | Shared drawing helpers |
+| `vision/overlay.py` | Shared drawing helpers, including the angle panel (heading vs. hazard, FACING / NOT FACING) |
+| `vision/run_phone.py` | Live app on the phone's camera stream (Level 2c) |
+| `vision/head_yaw.py` | Worker heading from the Muse S: runs `max/headmotion` (Max's BrainFlow → yaw code) in a background thread (Level 3) |
 | `vision/tests/test_hazards.py`, `test_floor.py`, `test_scene.py`, `test_phone.py` | Unit tests, including a simulated angled camera and one real YOLO run |
 
 ## Setup
@@ -130,8 +132,19 @@ The phone is the camera: Sean's `stream_data/` server receives its video over We
    use the phone's hotspot instead.
 2. Open the printed `https://<laptop IP>:8443` in **Chrome** on the phone, tap **Advanced → Proceed**
    (self-signed certificate), then **Start streaming** and allow the camera.
-3. The laptop opens a **SightLine phone** window with the overlay (same colours as Level 2b).
-   Keys: `a` / `d` head yaw, `f` freeze calibration, `s` save it. `q` hides the window until restart.
+3. The overlay (same colours as Level 2b) is a web page: `https://localhost:8443/overlay`, or the
+   **Vision** tab of the phone-alert page at `http://localhost:8765/#vision` (start it with
+   `python phone-alert/server/server.py`; the first time, open `https://localhost:8443` once in that browser and
+   accept the certificate warning, or the tab stays empty). Buttons / keys: `a` / `d` head yaw, `z` re-zero the
+   Muse heading, `f` freeze calibration, `s` save it.
+   No window opens by default. `--window` shows the overlay in an OpenCV window as well (`q` hides it; reopen at
+   `https://localhost:8443/window`).
+
+**Wrong IP printed?** The server prints the first network address it finds. With a VPN on (e.g.
+ProtonVPN), that's the VPN's address and the phone can't reach it. Find the Wi-Fi address with
+`ipconfig` (the "Wireless LAN adapter Wi-Fi" IPv4 line) and open `https://<that IP>:8443` instead.
+If the page loads but video never connects, turn the VPN off (or allow LAN access in its settings)
+and allow Python through Windows Firewall.
 
 | Where | What |
 |---|---|
@@ -151,13 +164,83 @@ The phone is the camera: Sean's `stream_data/` server receives its video over We
 
 **If the laptop's IP changes** (new Wi-Fi), restart with `--new-cert` and open the new address on the phone.
 
-## Level 3: with the Muse (later)
+**Only the worker and the car (`--tags-only`).** YOLO then looks for people only, so other objects
+(a toy truck, a chair read as a bus) are never drawn or reported as hazards. Vehicles come only from
+`--car-marker` tags, and other people are hidden. Floor markers are outlined in cyan with their id.
 
-Once fusion exists: tare the Muse while facing +x (toward marker 1), then compare the live head yaw
-with the yellow head arrow, and `rel_bearing_deg` with where the hazard really is.
+```powershell
+.venv\Scripts\python -m vision.run_phone --layout floor_layout.json --car-marker 42 --tags-only
+```
+
+**Buzz the phone.** `--buzz` sends a notification through the phone-alert server (`http://localhost:8765`, or
+`--buzz URL`) every 5 s (`--buzz-every`) while a worker is in view and a hazard shows **NOT FACING**. It only
+sends if a phone app is connected to that server (otherwise the terminal says so once), and never when the
+verdict is blank (heading not ready or lost). Start `python phone-alert/server/server.py` first; add
+`--alert-token` if that server has a `--token`.
+
+**Angle panel** (top right of the overlay window): a top-down dial in the floor frame (+x right,
++y up) with the worker's heading (yellow arrow), the direction from the worker to the car (orange
+arrow) and the facing cone (shaded). Below it: worker heading, car bearing, relative angle (+ = car
+to the worker's left), and **FACING** (green) when |relative angle| ≤ `--facing-deg` (default 30),
+else **NOT FACING** (red). Each hazard in `/hazards` also gets `"facing": true / false / null`.
+Without `--muse`, the heading is the one you set with `a` / `d`.
+
+## Level 3: worker heading from the Muse S
+
+The worker wears the Muse S. `--muse` reads its gyro over Bluetooth with BrainFlow and turns it into
+a heading on the floor frame (Max's code in `max/headmotion`: bias removal, tilt correction, yaw).
+That heading replaces the `a` / `d` arrow, so the angle panel says whether the worker is really
+facing the car.
+
+```powershell
+.venv\Scripts\pip install -r requirements.txt          # includes brainflow
+.venv\Scripts\python -m vision.run_phone --layout floor_layout.json --car-marker 42 --tags-only --muse
+```
+
+1. **Before starting:** switch the Muse S on, close the Muse phone app, and **don't pair it in Windows
+   Bluetooth settings** (remove it there if it is). BrainFlow connects to it directly, and only one
+   program can hold it. Keep it near the laptop.
+2. **Connecting:** the terminal prints `[muse] opening muse`. If the band isn't found it says so and
+   retries every few seconds; the panel shows `heading: muse: not found, retrying`. Once the band is
+   on it connects by itself, no restart needed.
+3. **Calibrating (5 s):** on `[muse] connected`, the worker stands **completely still facing +x**
+   (toward floor marker 1). This measures the gyro bias. Any movement (more than ~2 °/s of wobble)
+   restarts it, and the terminal prints `keep still during bias measurement; measuring bias again`.
+   If that keeps happening, rest the band on a table for the 5 s, put it on, then face +x and press `z`.
+   The panel shows `heading not ready` until calibration is done.
+4. **Running:** the panel's yellow arrow follows the worker's head. 0° = facing +x; turning left
+   (counter-clockwise seen from above) is positive.
+5. **Re-zero** whenever the worker faces +x again (start of each run, or after drift): press `z` in the
+   overlay window, or open `https://localhost:8443/zero`.
+
+| Check | How | Pass |
+|---|---|---|
+| Sign | After calibrating, turn the head left | heading goes **up** (positive). If it goes down, restart with `--muse-flip` |
+| Scale | Face +x, press `z`, then face +y (toward marker 3) | about +90° |
+| Facing | Look straight at the car | relative angle near 0, **FACING**; look 90° away → **NOT FACING** |
+| Drift | Stand still for a few minutes | heading moves slowly (well under a few °/min); re-zero with `z` |
+| Dropout | Switch the band off | panel shows `muse: NO DATA` within 2 s and the verdict blanks; it reconnects by itself |
+
+Options: `--muse-name MuseS-1A2B` / `--muse-mac` when several bands are around, `--muse-board muse_s_bled
+--muse-port COM3` for the BLED112 dongle, `--muse-bias 5` calibration seconds, `--muse-flip` to negate
+the yaw, `--facing-deg 30` the facing cone. Without hardware, `--muse synthetic:joint` (recorded fake head
+motion) or `--muse --muse-board synthetic` (BrainFlow's fake board) run the same code path.
+
+**Sharing the band with the dashboard.** Only one program can hold the Muse. To see the same heading in the
+phone-alert page's Dashboard tab and the Vision tab, let the dashboard own the band
+(`python phone-alert/server/server.py --dashboard`, with the `max/` venv's Python) and start the vision
+server with `--muse dashboard` instead of `--muse`. It then reads the yaw from the dashboard
+(`--dashboard-url`, default `http://127.0.0.1:5000`), and `z` / the Zero button calls the dashboard's re-zero.
+`--muse-flip` works the same way. The calibration and bias steps below happen in the dashboard.
+
+`a` / `d` still work with `--muse`: they add a fixed offset on top of the Muse heading (shown in the panel).
+
+**Limits.** The Muse has no magnetometer, so the heading is relative to the last zero and drifts slowly.
+`max/calibration.json` still holds placeholder values (axis, sign, scale) until Max's axis and scale
+experiments are run on our band. `max/README.md` and `max/docs/` cover those experiments and the
+standalone tools (`max/scripts/live_yaw.py`, `record.py`, `analyze.py`).
 
 ## What isn't testable yet
 
-Velocities and time to contact, the MQTT output, and live head yaw from the Muse. Those come next in
-the plan. The most useful test right now is the day-one one: does stock YOLO26 see the RC car from
-this camera angle?
+Velocities and time to contact, and blending the Muse heading with the camera (until then the Muse
+heading drifts until re-zeroed).
