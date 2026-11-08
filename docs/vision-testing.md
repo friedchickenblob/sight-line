@@ -132,9 +132,13 @@ The phone is the camera: Sean's `stream_data/` server receives its video over We
    use the phone's hotspot instead.
 2. Open the printed `https://<laptop IP>:8443` in **Chrome** on the phone, tap **Advanced → Proceed**
    (self-signed certificate), then **Start streaming** and allow the camera.
-3. The laptop opens a **SightLine phone** window with the overlay (same colours as Level 2b).
-   Keys: `a` / `d` head yaw, `z` re-zero the Muse heading, `f` freeze calibration, `s` save it.
-   `q` hides the window; reopen it at `https://localhost:8443/window`.
+3. The overlay (same colours as Level 2b) is a web page: `https://localhost:8443/overlay`, or the
+   **Vision** tab of the phone-alert page at `http://localhost:8765/#vision` (start it with
+   `python phone-alert/server/server.py`; the first time, open `https://localhost:8443` once in that browser and
+   accept the certificate warning, or the tab stays empty). Buttons / keys: `a` / `d` head yaw, `z` re-zero the
+   Muse heading, `f` freeze calibration, `s` save it.
+   No window opens by default. `--window` shows the overlay in an OpenCV window as well (`q` hides it; reopen at
+   `https://localhost:8443/window`).
 
 **Wrong IP printed?** The server prints the first network address it finds. With a VPN on (e.g.
 ProtonVPN), that's the VPN's address and the phone can't reach it. Find the Wi-Fi address with
