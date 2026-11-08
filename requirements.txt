@@ -1,0 +1,26 @@
+# Everything SightLine's Python code needs, in one file. From the repo root:
+#   python -m venv .venv
+#   .venv\Scripts\pip install -r requirements.txt        (Windows; .venv/bin/pip on macOS/Linux)
+
+# --- shared ---
+numpy>=1.26
+pylsl>=1.16              # local_clock(), the team's shared clock (CLAUDE.md)
+paho-mqtt>=2.0           # MQTT messages under sightline/
+pytest>=8
+
+# --- vision/ (overhead camera: floor mapping, YOLO detection, hazard angles) ---
+opencv-contrib-python>=4.8   # the -contrib build has ArUco; don't also install opencv-python
+ultralytics>=8.4             # YOLO26 + ByteTrack (pulls in PyTorch, a large download)
+
+# --- stream_data/ (phone camera over WebRTC) ---
+aiortc>=1.9              # WebRTC: receives the phone's camera
+aiohttp>=3.9             # serves the phone page + the /offer endpoint
+cryptography>=42         # self-signed HTTPS certificate (Chrome needs HTTPS for the camera)
+pillow>=10               # JPEG frames + boxes for the /view page
+
+# --- max/ (Muse S head yaw + dashboard) ---
+brainflow>=5.12          # Muse S over Bluetooth (MUSE_S_BOARD), no muselsl/BlueMuse needed
+matplotlib>=3.7
+flask>=3.0               # max/dashboard and phone-alert/server
+
+# --- phone-alert/server: flask + paho-mqtt (above) ---

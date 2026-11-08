@@ -4,7 +4,7 @@ name: Claude
 #   - comments "@claude ..." on an issue or pull request, or
 #   - adds the "claude-ok" label to an issue.
 # Claude follows CLAUDE.md, works on a jordan/claude-... branch and opens a pull request.
-# One-time setup: README -> "Claude on GitHub".
+# One-time setup: SETUP.md -> "Claude on GitHub".
 on:
   issue_comment:
     types: [created]
