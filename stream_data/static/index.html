@@ -65,6 +65,15 @@
         <option value="15">15 fps</option>
         <option value="30" selected>30 fps</option>
       </select>
+      <select id="quality" title="Locked keeps the resolution and bitrate you pick; the frame rate drops instead">
+        <option value="auto" selected>Quality: auto (smooth)</option>
+        <option value="2000">Locked · 2 Mbps</option>
+        <option value="4000">Locked · 4 Mbps</option>
+        <option value="8000">Locked · 8 Mbps</option>
+        <option value="16000">Locked · 16 Mbps</option>
+        <option value="30000">Locked · 30 Mbps</option>
+        <option value="max">Locked · max (all the Wi-Fi allows)</option>
+      </select>
     </div>
     <div class="row" style="margin-top: 8px">
       <button id="start" class="primary">Start streaming</button>
@@ -76,6 +85,7 @@
   <div class="card">
     <dl>
       <dt>sending</dt><dd id="sending">–</dd>
+      <dt>limited by</dt><dd id="limited">–</dd>
       <dt>model</dt><dd id="model">–</dd>
       <dt>server latency</dt><dd id="latency">–</dd>
       <dt>dropped</dt><dd id="dropped">–</dd>
@@ -84,6 +94,6 @@
   </div>
 </main>
 
-<script src="/static/client.js"></script>
+<script src="/static/client.js?v=3"></script>
 </body>
 </html>
