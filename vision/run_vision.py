@@ -4,6 +4,7 @@
     python -m vision.run_vision --layout floor_layout.json         # calibrate live from floor markers
     python -m vision.run_vision --calib floor_calib.json --layout floor_layout.json   # saved calibration
     python -m vision.run_vision --video clip.mp4                   # recorded video instead of the camera
+    python -m vision.run_vision --video clip.mp4 --layout floor_layout.json --car-marker 20 --worker-marker 10
 
 Without a floor calibration you get boxes, track IDs and ground points, but no metres or angles.
 With one, each vehicle gets distance, bearing (floor frame: 0 = +x, CCW +) and bearing relative
@@ -53,6 +54,8 @@ def main() -> None:
     ap.add_argument("--car-marker", type=int, action="append", default=[], metavar="ID",
                     help="ArUco id taped on the toy car (repeatable)")
     ap.add_argument("--car-label", default="toy car")
+    ap.add_argument("--worker-marker", type=int, metavar="ID",
+                    help="ArUco id on top of the worker's hardhat: that person is the worker")
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--vehicles", nargs="+", default=sorted(VEHICLE_LABELS), help="COCO classes treated as vehicles")
     ap.add_argument("--no-track", action="store_true", help="detection only, no ByteTrack IDs")
@@ -68,7 +71,8 @@ def main() -> None:
     det = Detector(args.model, args.conf, args.imgsz, not args.no_track, args.vehicles,
                    vehicle_conf=args.vehicle_conf)
     pipe = VisionPipeline(det, layout, fm, args.head_yaw,
-                          hazard_markers={i: args.car_label for i in args.car_marker})
+                          hazard_markers={i: args.car_label for i in args.car_marker},
+                          worker_marker=args.worker_marker)
     cap = open_source(args)
 
     cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)

@@ -69,6 +69,46 @@ def test_worker_selection_is_sticky():
     assert sel.select([]) is None
 
 
+def tag(cx, cy, half=10):
+    """Corner pixels of a marker centred on (cx, cy)."""
+    return np.array([[cx - half, cy - half], [cx + half, cy - half], [cx + half, cy + half], [cx - half, cy + half]])
+
+
+def test_hardhat_marker_picks_the_worker_and_fixes_its_id():
+    sel = WorkerSelector(hardhat_marker=10)
+    worker = Detection("person", "person", 0.4, (100, 100, 200, 300), track_id=5)
+    other = Detection("person", "person", 0.95, (400, 100, 500, 300), track_id=6)
+    w = sel.select([worker, other], {10: tag(150, 150)})
+    assert w.track_id == 10 and w.box == worker.box      # less confident, but wearing the hardhat
+    assert w.ground_px == (150, 150) and w.source == "marker"
+    renumbered = Detection("person", "person", 0.4, (100, 100, 200, 300), track_id=9)
+    assert sel.select([renumbered, other], {10: tag(152, 150)}).track_id == 10   # ByteTrack new id: same worker
+
+
+def test_hardhat_marker_without_a_person_box_is_the_worker():
+    w = WorkerSelector(hardhat_marker=10).select([], {10: tag(300, 200)})
+    assert w is not None and w.track_id == 10 and w.ground_px == (300, 200)
+
+
+def test_hardhat_hidden_keeps_the_nearest_person_and_ignores_far_ones():
+    sel = WorkerSelector(hardhat_marker=10, max_jump_px=150)
+    assert sel.select([Detection("person", "person", 0.9, (400, 100, 500, 300), 6)], {}) is None  # no marker seen yet
+    sel.select([], {10: tag(150, 200)})
+    near = Detection("person", "person", 0.3, (110, 120, 210, 300), track_id=7)
+    far = Detection("person", "person", 0.99, (600, 100, 700, 300), track_id=8)
+    assert sel.select([near, far], {}).box == near.box   # marker hidden (crouching): nearest person
+    assert sel.select([far], {}) is None                 # only a far-away person: not the worker
+
+
+def test_hardhat_worker_is_not_listed_as_another_person(fm):
+    p = fake("person", (1.0, 1.0), track_id=3)
+    cx, cy = (p.box[0] + p.box[2]) / 2, p.box[1] + 10
+    s = build_scene([p, fake("person", (2.5, 1.5), track_id=4)], fm, selector=WorkerSelector(10),
+                    markers={10: tag(cx, cy, 5)})
+    assert s.worker.det.track_id == 10
+    assert [o.det.track_id for o in s.other_people] == [4]
+
+
 def test_yolo_detects_person_and_vehicle_on_sample_image():
     pytest.importorskip("ultralytics")
     import cv2

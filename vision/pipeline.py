@@ -33,26 +33,33 @@ class VisionPipeline:
     floor_map       a saved calibration: used as-is (frozen) until unfrozen with a layout
     hazard_markers  {marker id: label}: an ArUco tag stuck on top of a vehicle (e.g. {4: "toy car"}).
                     Found every frame regardless of YOLO; its centre is the vehicle's floor point.
+    worker_marker   ArUco id taped on top of the worker's hardhat: that person is the worker, with a
+                    fixed track id (scene.WorkerSelector). None = most confident tracked person.
     """
 
     def __init__(self, detector: Detector, layout: FloorLayout | None = None,
                  floor_map: FloorMap | None = None, head_yaw_deg: float = 0.0,
-                 hazard_markers: dict[int, str] | None = None, dictionary: str | None = None):
+                 hazard_markers: dict[int, str] | None = None, dictionary: str | None = None,
+                 worker_marker: int | None = None):
         self.detector, self.layout, self.floor_map = detector, layout, floor_map
         self.frozen = floor_map is not None
         self.head_yaw_deg = head_yaw_deg
-        self.selector = WorkerSelector()
+        self.selector = WorkerSelector(worker_marker)
+        self.worker_marker = worker_marker
         self.hazard_markers = dict(hazard_markers or {})
         self.dictionary = dictionary or (layout.dictionary if layout else "DICT_4X4_50")
         clash = set(self.hazard_markers) & set(layout.markers if layout else ())
         if clash:
             raise ValueError(f"marker ids {sorted(clash)} are floor markers; tag the vehicle with another id")
+        if worker_marker is not None and (worker_marker in self.hazard_markers
+                                          or worker_marker in (layout.markers if layout else ())):
+            raise ValueError(f"marker {worker_marker} is the worker's hardhat; it can't be a floor or vehicle marker")
         self.frames = 0
 
     def process(self, frame: np.ndarray) -> FrameResult:
         self.frames += 1
         found = None
-        if self.layout is not None or self.hazard_markers:
+        if self.layout is not None or self.hazard_markers or self.worker_marker is not None:
             found = detect_markers(frame, self.dictionary)      # one search serves the floor and the tags
 
         status = "no floor map (pixels only)"
@@ -70,7 +77,7 @@ class VisionPipeline:
         infer_ms = (time.perf_counter() - t0) * 1000
         if self.hazard_markers:
             dets = add_marker_hazards(dets, found or {}, self.hazard_markers)
-        scene = build_scene(dets, self.floor_map, self.head_yaw_deg, self.selector)
+        scene = build_scene(dets, self.floor_map, self.head_yaw_deg, self.selector, found)
         return FrameResult(scene, status, infer_ms, self.frames)
 
     # ------------------------------------------------------------- keyboard
