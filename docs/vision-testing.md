@@ -172,6 +172,12 @@ and allow Python through Windows Firewall.
 .venv\Scripts\python -m vision.run_phone --layout floor_layout.json --car-marker 42 --tags-only
 ```
 
+**Buzz the phone.** `--buzz` sends a notification through the phone-alert server (`http://localhost:8765`, or
+`--buzz URL`) every 5 s (`--buzz-every`) while a worker is in view and a hazard shows **NOT FACING**. It only
+sends if a phone app is connected to that server (otherwise the terminal says so once), and never when the
+verdict is blank (heading not ready or lost). Start `python phone-alert/server/server.py` first; add
+`--alert-token` if that server has a `--token`.
+
 **Angle panel** (top right of the overlay window): a top-down dial in the floor frame (+x right,
 +y up) with the worker's heading (yellow arrow), the direction from the worker to the car (orange
 arrow) and the facing cone (shaded). Below it: worker heading, car bearing, relative angle (+ = car
@@ -219,6 +225,13 @@ Options: `--muse-name MuseS-1A2B` / `--muse-mac` when several bands are around, 
 --muse-port COM3` for the BLED112 dongle, `--muse-bias 5` calibration seconds, `--muse-flip` to negate
 the yaw, `--facing-deg 30` the facing cone. Without hardware, `--muse synthetic:joint` (recorded fake head
 motion) or `--muse --muse-board synthetic` (BrainFlow's fake board) run the same code path.
+
+**Sharing the band with the dashboard.** Only one program can hold the Muse. To see the same heading in the
+phone-alert page's Dashboard tab and the Vision tab, let the dashboard own the band
+(`python phone-alert/server/server.py --dashboard`, with the `max/` venv's Python) and start the vision
+server with `--muse dashboard` instead of `--muse`. It then reads the yaw from the dashboard
+(`--dashboard-url`, default `http://127.0.0.1:5000`), and `z` / the Zero button calls the dashboard's re-zero.
+`--muse-flip` works the same way. The calibration and bias steps below happen in the dashboard.
 
 `a` / `d` still work with `--muse`: they add a fixed offset on top of the Muse heading (shown in the panel).
 
