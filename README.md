@@ -32,7 +32,7 @@ Fewer pointless alarms means workers keep trusting the ones that matter. Nothing
 
 1. **Phone camera (overhead)** streams video to a laptop.
 2. **Floor map:** four ArUco markers on the floor turn camera pixels into metres.
-3. **Find the worker and the machine:** a hardhat marker tags the worker and a marker on top tags the machine, with YOLO + ByteTrack and a dark-blob fallback.
+3. **Find the worker and the machine:** tags the worker and a marker on top tags the machine, with YOLO + ByteTrack.
 4. **Velocities:** a line fit over the last 0.5 s gives the machine's speed and direction.
 5. **Head direction:** the Muse S headband's gyro gives head yaw over Bluetooth.
 6. **Alert rule:** approaching (faster than 0.1 m/s, within 60° of the line to the worker) **and** not facing (the vehicle is outside the worker's 60° field of view, 30° either side of their head direction). The current build checks this on every frame; the 0.3 s in 3 s memory is next.
@@ -41,9 +41,6 @@ Fewer pointless alarms means workers keep trusting the ones that matter. Nothing
 ## Features
 
 - Alerts only when the worker hasn't seen the machine
-- Accurate floor tracking: about 3 cm position error on our test floor; hardhat heading within about 3°
-- Phone as the camera: no special hardware to stream video
-- Works offline on a phone hotspot
 - Nothing installed on the machinery; it just needs a marker
 - Live overlay and dashboard on the laptop
 - JSON hazard messages (optional MQTT on `sightline/vision/hazards`)
@@ -91,7 +88,7 @@ Open the printed `https://<laptop IP>:8443` link on the camera phone and tap **S
 ## Future work
 
 - **Before the demo:** a fail-safe buzz when data goes stale; a time-to-contact gate; "looked recently" memory, so a quick glance counts; bigger markers and sharper video
-- **Next:** several machines at once; fixed hazard zones (pit edges, swing radius); a Kalman filter to keep tracking through gaps; camera-corrected heading; the ESP32 wristband
+- **Next:** several types of machines at once; blink check using eeg; camera-corrected heading; the ESP32 wristband; integrate with existing solutions
 - **Later:** detecting machines without markers; scoring hit and false-alarm rates; several workers; a pilot at a warehouse or industrial site
 
 ## Repo layout
