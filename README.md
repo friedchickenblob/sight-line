@@ -103,4 +103,4 @@ Open the printed `https://<laptop IP>:8443` link on the camera phone and tap **S
 
 Jordan · Hanh · Zoe · Sean · Max
 
-**Presentation:** [View the slides](https://docs.google.com/presentation/d/1hu-r9BPmQ32ijDNpcoeCR9FcKZ0D4L4cEIOE1JYtlRU/edit?usp=sharing)
+**Presentation:** [View the slides](https://docs.google.com/presentation/d/1t13ZtIqsxs16iZcIYVXx7oh5SSoA-M6J/edit?usp=sharing&ouid=101984232930867946887&rtpof=true&sd=true)
