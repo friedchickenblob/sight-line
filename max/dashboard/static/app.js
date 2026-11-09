@@ -122,7 +122,10 @@ function renderHeader(s) {
   $("source").textContent = `source: ${s.source}`;
   const st = $("status");
   const state = s.ended ? "ended" : s.health.connected ? "live" : "stale";
-  st.textContent = state === "live" ? "live" : state === "ended" ? "source ended" : "no gyro data";
+  const m = s.muse || {};
+  const noMuse = m.available && !m.connected;
+  st.textContent = state === "live" ? "live" : state === "ended" ? "source ended"
+    : noMuse ? (m.searching ? "searching for Muse…" : "Muse not connected") : "no gyro data";
   st.className = `pill ${state}`;
   $("rate").textContent = fmt(s.health.rate_hz, 0);
   $("drops").textContent = fmt(s.health.drops_per_min, 1);
@@ -143,6 +146,17 @@ function renderYaw(s) {
   $("cam-age").textContent = y.cam_age_s === null ? "no camera" : `${fmt(y.cam_age_s, 2)} s`;
   $("valid").innerHTML = y.valid ? '<span class="good">yes</span>' : '<span class="badv">no</span>';
   if (y.yaw_deg !== null) $("yaw-marker").style.left = `${50 + y.yaw_deg / 3.6}%`;
+}
+
+function renderMuse(m) {
+  const btn = $("btn-muse"), text = $("muse-text");
+  btn.hidden = text.hidden = !(m && m.available);
+  if (!m || !m.available) return;
+  btn.disabled = m.connected || m.searching;
+  btn.textContent = m.searching ? "Searching…" : "Search for Muse";
+  text.textContent = m.connected ? "Muse connected"
+    : m.searching ? "looking for the band (up to ~15 s)"
+    : "Muse not connected: switch it on, close the Muse app, then search";
 }
 
 function renderRecording(r) {
@@ -179,6 +193,7 @@ function onSnapshot(s) {
   renderFields(s.latest, s.counts);
   renderYaw(s);
   renderRecording(s.recording);
+  renderMuse(s.muse);
   addLog(s.log);
 }
 
@@ -215,6 +230,7 @@ $("btn-start").onclick = () => post("/api/record/start", { name: $("rec-name").v
 $("btn-stop").onclick = () => post("/api/record/stop");
 $("btn-mark").onclick = () => post("/api/mark");
 $("btn-rezero").onclick = () => post("/api/rezero");
+$("btn-muse").onclick = async () => { const j = await post("/api/muse/search"); if (j.muse) renderMuse(j.muse); };
 
 // ------------------------------------------------------- phone camera (--phone)
 const phoneFeeds = new Map();             // phone session id -> <figure>

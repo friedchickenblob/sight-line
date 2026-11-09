@@ -11,6 +11,7 @@ A batch may be empty: that is how a consumer notices the stream went quiet.
 from __future__ import annotations
 
 import csv
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -170,12 +171,16 @@ class LiveMuse:
     If no data arrives for `reconnect_after_s`, the session is torn down and
     prepared again (B3: no manual restart needed). Human-readable notes about
     that go to `events`.
+
+    connect=False starts without the band: nothing is read and nothing retries
+    until search() finds it (the dashboard's "Search for Muse" button). From then
+    on a lost connection reconnects by itself as above.
     """
 
     def __init__(self, board: str = "muse_s", name: str | None = None, mac: str | None = None,
                  serial_port: str | None = None, muse_preset: str | None = None, timeout_s: float = 15.0,
                  poll_s: float = 0.01, extra: Sequence[Extra] = (), reconnect_after_s: float = 3.0,
-                 clock: Callable[[], float] | None = None):
+                 clock: Callable[[], float] | None = None, connect: bool = True):
         """name: the band's Bluetooth name (e.g. MuseS-1A2B) when several are around; mac: its address.
         serial_port: COM port of the BLED112 dongle (board="muse_s_bled" only).
         muse_preset: Muse preset string for BrainFlow's other_info; None = BrainFlow's default (p21)."""
@@ -209,7 +214,39 @@ class LiveMuse:
         BoardShim.disable_board_logger()
         self._BoardShim = BoardShim
         self._board = None
-        self._connect()
+        self._last_data = self._clock()
+        self._auto_reconnect = connect           # off until the first connection when connect=False
+        self._link_lock = threading.Lock()       # one connect attempt at a time (search vs. reconnect)
+        self.searching = False
+        if connect:
+            self._connect()
+
+    @property
+    def connected(self) -> bool:
+        return self._board is not None
+
+    def search(self) -> bool:
+        """Try once to find and open the band. Blocks up to timeout_s, so call it from a
+        background thread; poll() keeps running meanwhile. Returns whether it is connected."""
+        if not self._link_lock.acquire(blocking=False):
+            return self.connected                # a search or reconnect is already running
+        try:
+            if self._board is not None:
+                return True
+            self.searching = True
+            self.events.append("searching for the Muse")
+            self.decoder.reset()                 # before _connect: poll() starts decoding once _board is set
+            try:
+                self._connect()
+            except RuntimeError as e:
+                self.events.append(str(e))
+                return False
+            self._auto_reconnect = True
+            self.events.append("Muse connected")
+            return True
+        finally:
+            self.searching = False
+            self._link_lock.release()
 
     @staticmethod
     def _motion_preset(BoardShim, board_id):
@@ -258,8 +295,16 @@ class LiveMuse:
         return self._clock()
 
     def _maybe_reconnect(self, now: float):
-        if now - self._last_data < self._reconnect_after:
+        if not self._auto_reconnect or now - self._last_data < self._reconnect_after:
             return
+        if not self._link_lock.acquire(blocking=False):
+            return                               # search() is connecting right now
+        try:
+            self._reconnect(now)
+        finally:
+            self._link_lock.release()
+
+    def _reconnect(self, now: float):
         self.events.append(f"no Muse data for {now - self._last_data:.1f} s: reconnecting")
         self._disconnect()
         try:
@@ -274,9 +319,20 @@ class LiveMuse:
         """One non-blocking read: everything that arrived since the last call."""
         batch: list[Sample] = []
         now = self._clock()
-        if self._board is not None:
-            data = self._board.get_board_data(preset=self._preset)
-            if data.shape[1]:
+        board = self._board
+        data = None
+        if board is not None:
+            try:
+                data = board.get_board_data(preset=self._preset)
+            except Exception as e:                  # BrainFlowError: session gone (e.g. half-made reconnect)
+                if self._link_lock.acquire(blocking=False):
+                    try:
+                        if self._board is board:
+                            self.events.append(f"Muse read failed ({e}): dropping the session, will reconnect")
+                            self._disconnect()
+                    finally:
+                        self._link_lock.release()
+            if data is not None and data.shape[1]:
                 offset = now - time.time()                 # BrainFlow stamps with wall-clock time
                 pkg, ts, acc, gyro = self._rows
                 batch = self.decoder.decode(data[pkg], data[ts] + offset, data[acc].T, data[gyro].T)
