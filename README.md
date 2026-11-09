@@ -31,6 +31,8 @@ If the head data goes missing, the system buzzes anyway: when in doubt, warn the
 ## Start here
 
 - **Set up your laptop and the repo:** [SETUP.md](SETUP.md)
+- **Run the full stack (what to start, links, connecting the phone and Muse):** [RUNNING.md](RUNNING.md)
+- **How it all works (tech stack, data flow, APIs, which files to read):** [ARCHITECTURE.md](ARCHITECTURE.md)
 - **How we work** (branch names, commit format, pull requests): [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Rules for Claude in this repo:** [CLAUDE.md](CLAUDE.md)
 - **Vision (camera, hazard angles):** [docs/vision-hazard-plan.md](docs/vision-hazard-plan.md) and how to test it, [docs/vision-testing.md](docs/vision-testing.md)
