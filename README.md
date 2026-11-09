@@ -4,7 +4,7 @@ Built for natHACKS 2026 by Jordan, Hanh, Zoe, Sean and Max.
 
 **A proximity alarm that knows whether you've already seen the hazard.** SightLine buzzes a worker only when a machine is heading at them **and** they aren't looking at it. If they've already seen it, it stays quiet.
 
-▶️ **Demo video:** [Watch the video](https://drive.google.com/file/d/11vS8G74UPsY7eiGM_7_J2Q-Pj-J6rIXM/view?usp=sharing)
+**Demo video:** [Watch the video](https://drive.google.com/file/d/11vS8G74UPsY7eiGM_7_J2Q-Pj-J6rIXM/view?usp=sharing)
 
 ## The problem
 
@@ -38,7 +38,7 @@ Fewer pointless alarms means workers keep trusting the ones that matter. Nothing
 - Accurate floor tracking: about 3 cm position error on our test floor; hardhat heading within about 3°
 - Phone as the camera: no special hardware to stream video
 - Works offline on a phone hotspot
-- Nothing installed on the machine; it just needs a marker
+- Nothing installed on the machinery; it just needs a marker
 - Live overlay and dashboard on the laptop
 - JSON hazard messages (optional MQTT on `sightline/vision/hazards`)
 
@@ -76,7 +76,7 @@ Open the printed `https://<laptop IP>:8443` link on the camera phone and tap **S
 ## Current limits
 
 - Only tracks machines that carry a marker, and one machine at a time
-- Small markers, occlusion and dim light can lose the machine
+- Markers are small; occlusion and dim light can lose the machine
 - When data is missing, it stays silent today. A fail-safe buzz is the next fix
 - Doesn't yet weigh distance or time to contact
 - Muse heading drifts and needs re-zeroing
@@ -103,4 +103,4 @@ Open the printed `https://<laptop IP>:8443` link on the camera phone and tap **S
 
 Jordan · Hanh · Zoe · Sean · Max
 
-📊 **Presentation:** [View the slides](https://docs.google.com/presentation/d/1hu-r9BPmQ32ijDNpcoeCR9FcKZ0D4L4cEIOE1JYtlRU/edit?usp=sharing)
+**Presentation:** [View the slides](https://docs.google.com/presentation/d/1hu-r9BPmQ32ijDNpcoeCR9FcKZ0D4L4cEIOE1JYtlRU/edit?usp=sharing)
