@@ -1,6 +1,6 @@
 """Live dashboard: every recorded field on screen, with recording controls.
 
-    python dashboard/app.py                               # Muse S over BrainFlow
+    python dashboard/app.py                               # Muse S over BrainFlow (page works without it)
     python dashboard/app.py --board synthetic             # BrainFlow's fake board, no headband
     python dashboard/app.py --source synthetic:joint      # synthetic recording, played in real time
     python dashboard/app.py --source replay:data/raw/session.csv
@@ -10,6 +10,9 @@
 Then open http://127.0.0.1:5000. Start/Stop writes a CSV to data/raw/ in the same
 format as record.py (kind,t,v0,v1,v2), so analyze.py and replay read it as is.
 Mark and Re-zero add MARK / RESET rows, like pressing Enter in record.py / live_yaw.py.
+
+With the Muse, the page comes up straight away, connected or not: it searches for the
+band once at startup, and the "Search for Muse" button searches again (in the background).
 
 The browser gets updates ~10 times a second over Server-Sent Events (/stream).
 
@@ -130,10 +133,9 @@ class Hub:
             for e in self.pipe.events[self._shown:]:
                 self._note(e)
             self._shown = len(self.pipe.events)
-            for e in getattr(self.src, "events", ()):
-                self._note(e)
-            if hasattr(self.src, "events"):
-                self.src.events.clear()
+            events = getattr(self.src, "events", None)
+            while events:                              # popleft: a search thread may append meanwhile
+                self._note(events.popleft())
             if self.pub and now >= self._next_pub:
                 self._next_pub = now + 1.0
                 self.pub.publish(self.health.report(now, getattr(self.src, "battery_pct", None)))
@@ -204,6 +206,21 @@ class Hub:
         with self.lock:
             self._pending.append((RESET, (0.0,)))
 
+    def search_muse(self) -> dict:
+        """Look for the Muse in a background thread (connecting blocks for up to ~15 s)."""
+        if not hasattr(self.src, "search"):
+            raise RuntimeError("this source has no Muse to search for")
+        st = self._muse_state()
+        if not st["connected"] and not st["searching"]:
+            self.src.searching = True                   # show "searching" before the thread gets going
+            threading.Thread(target=self.src.search, daemon=True, name="muse-search").start()
+        return self._muse_state()
+
+    def _muse_state(self) -> dict:
+        if not hasattr(self.src, "search"):
+            return dict(available=False, connected=None, searching=False)
+        return dict(available=True, connected=self.src.connected, searching=self.src.searching)
+
     # -- what the page sees
     def _rec_state(self) -> dict:
         if not self.rec:
@@ -227,6 +244,7 @@ class Hub:
                                           lost_samples=self.health.lost_samples),
                 bias=None if self.pipe.est.bias is None else [round(float(b), 3) for b in self.pipe.est.bias],
                 recording=self._rec_state(),
+                muse=self._muse_state(),
             )
 
 
@@ -277,6 +295,13 @@ def create_app(hub: Hub, phone=None) -> Flask:
     def rezero():
         hub.rezero()
         return jsonify(ok=True)
+
+    @app.post("/api/muse/search")
+    def muse_search():
+        try:
+            return jsonify(ok=True, muse=hub.search_muse())
+        except RuntimeError as e:
+            return jsonify(ok=False, error=str(e)), 409
 
     # -- phone camera (--phone)
     @app.get("/api/phone")
@@ -343,7 +368,8 @@ def main():
 
     live = args.source == "muse"
     cam = camera_subscriber(args)
-    src = open_source(args.source, realtime=True, **(muse_kwargs(args, [cam] if cam else []) if live else {}))
+    muse_kw = muse_kwargs(args, [cam] if cam else []) | dict(connect=False) if live else {}
+    src = open_source(args.source, realtime=True, **muse_kw)    # live: page first, Muse search below
     pub = None
     if args.mqtt:
         from headmotion.bus import Publisher, parse_host
@@ -357,6 +383,8 @@ def main():
     hub._note(f"hold still for {args.bias_seconds:.0f} s, facing the start line (bias)")
     phone = open_phone_stream(args) if args.phone else None
     hub.start()
+    if live:
+        hub.search_muse()                               # first search in the background; button retries
     print(f"dashboard: http://{args.host}:{args.port}")
     if phone is not None:
         hub._note(f"phone camera: open {phone.url} on the phone (same Wi-Fi)")

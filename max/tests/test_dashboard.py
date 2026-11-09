@@ -140,3 +140,41 @@ def test_phone_status_and_video_come_through_the_dashboard(tmp_path):
 def test_phone_errors_show_on_the_page_not_as_a_500(tmp_path):
     p = create_app(_hub(tmp_path, []), FakePhone(fail=True)).test_client().get("/api/phone").get_json()
     assert p["enabled"] and "TimeoutError" in p["error"] and p["sessions"] == []
+
+
+class FakeMuse(Replay):
+    """A Replay with LiveMuse's search interface."""
+
+    def __init__(self, found=True):
+        super().__init__([])
+        from collections import deque
+        self.connected, self.searching, self.found, self.events = False, False, found, deque()
+
+    def search(self):
+        self.connected, self.searching = self.found, False
+        self.events.append("Muse connected" if self.found else "could not start the Muse")
+        return self.found
+
+
+def test_muse_search_button_without_a_muse_source_is_refused(tmp_path):
+    c = create_app(_hub(tmp_path, [])).test_client()
+    assert c.get("/api/state").get_json()["muse"]["available"] is False
+    r = c.post("/api/muse/search")
+    assert r.status_code == 409 and not r.get_json()["ok"]
+
+
+@pytest.mark.parametrize("found", [True, False])
+def test_muse_search_button_runs_a_search_and_logs_it(tmp_path, found):
+    import time
+    src = FakeMuse(found)
+    hub = Hub(src, YawPipeline(HeadYawEstimator(), retry_bias=True), tmp_path, source_name="muse")
+    c = create_app(hub).test_client()
+    assert c.get("/api/state").get_json()["muse"] == dict(available=True, connected=False, searching=False)
+    assert c.post("/api/muse/search").get_json()["ok"]
+    t_end = time.monotonic() + 2
+    while src.searching and time.monotonic() < t_end:
+        time.sleep(0.01)
+    hub.step([])
+    snap = hub.snapshot()
+    assert snap["muse"]["connected"] is found and not snap["muse"]["searching"]
+    assert any(("Muse connected" if found else "could not start") in text for _, text in snap["log"])

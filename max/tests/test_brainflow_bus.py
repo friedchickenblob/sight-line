@@ -92,6 +92,56 @@ def test_live_brainflow_synthetic_board():
     assert src.battery_pct is not None                       # the synthetic board has one; the Muse S doesn't
 
 
+def test_live_muse_can_start_disconnected_and_search_later():
+    """connect=False: no data and no retries until search() finds the board (dashboard button)."""
+    pytest.importorskip("brainflow")
+    from headmotion.sources import LiveMuse
+    with LiveMuse(board="synthetic", clock=time.monotonic, connect=False) as src:
+        assert not src.connected
+        src._last_data -= 60                                 # long overdue: a connected source would reconnect
+        assert not [s for s in src.poll() if s.kind == GYRO]
+        assert not src.connected                             # poll() didn't try to connect on its own
+        assert src.search() and src.connected and not src.searching
+        assert "Muse connected" in src.events
+        out, t_end = [], time.monotonic() + 0.5
+        while time.monotonic() < t_end:
+            out += src.poll()
+            time.sleep(0.02)
+    assert any(s.kind == GYRO for s in out)
+
+
+def test_a_failed_read_drops_the_session_and_reconnects_instead_of_ending():
+    """A reconnect that BrainFlow reports as fine but whose session is unusable (BOARD_NOT_CREATED on
+    the next read) must not end the source: drop it and reconnect after reconnect_after_s."""
+    pytest.importorskip("brainflow")
+    from brainflow.board_shim import BrainFlowError
+    from headmotion.sources import LiveMuse
+
+    class BrokenBoard:
+        def get_board_data(self, preset=None):
+            raise BrainFlowError("unable to obtain buffer size", 15)
+
+        def stop_stream(self):
+            pass
+
+        def release_session(self):
+            pass
+
+    with LiveMuse(board="synthetic", clock=time.monotonic) as src:
+        src._disconnect()
+        src._board = BrokenBoard()
+        assert src.poll() == [] and not src.connected          # no exception: session dropped
+        assert any("read failed" in e for e in src.events)
+        src._last_data -= 60                                   # reconnect is due
+        src.poll()
+        assert src.connected and "reconnected" in src.events
+        out, t_end = [], time.monotonic() + 0.5
+        while time.monotonic() < t_end:
+            out += src.poll()
+            time.sleep(0.02)
+    assert any(s.kind == GYRO for s in out)
+
+
 def test_unknown_board_is_rejected():
     pytest.importorskip("brainflow")
     from headmotion.sources import LiveMuse
