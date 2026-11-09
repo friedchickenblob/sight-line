@@ -25,8 +25,7 @@ To tell whether you've seen it, SightLine looks at your head direction. An overh
 
 Fewer pointless alarms means workers keep trusting the ones that matter. Nothing is wired into the machines, and everything runs offline over a phone hotspot.
 
-![image](https://github.com/user-attachments/assets/b4271d73-9d83-4a27-8cfb-b0d18299f14d)
-
+![image](https://github.com/user-attachments/assets/bbb1102a-c607-4c1c-86b7-28c18e567c49)
 
 ## How it works
 
