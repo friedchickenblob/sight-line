@@ -1,21 +1,27 @@
 # SightLine
 
-Built for natHACKS 2026 by Jordan, Hanh, Zoe, Sean and Max.
+Built for natHACKS 2026 by **Team Gyro Benders**: Jordan, Hanh, Zoe, Sean and Max.
 
-**A proximity alarm that knows whether you've already seen the hazard.** SightLine buzzes a worker only when a machine is heading at them **and** they aren't looking at it. If they've already seen it, it stays quiet.
+**A wearable that warns workers on foot about moving vehicles, but only when a vehicle is coming toward them and they haven't seen it.** Fewer alarms, so the real one gets noticed.
 
 **Demo video:** [Watch the video](https://drive.google.com/file/d/11vS8G74UPsY7eiGM_7_J2Q-Pj-J6rIXM/view?usp=sharing)
 
 ## The problem
 
-On worksites, backup alarms and horns go off every time a machine is nearby, whether or not anyone is paying attention. Workers hear them all shift and learn to tune them out. In the 2019 Fort Hills incident, a worker walking ahead of a reversing truck was killed. The driver honked and checked his mirrors; the warning happened, but nobody was looking. Most systems also alert the driver in the cab, not the person on foot.
+In June 2025, at a warehouse in BC, a worker was repairing a broken-down forklift. A second forklift backed up and pinned them between the two machines. Investigators found the area congested and poorly lit, and the backup alarms and mirrors were missing or blocked. A worker busy with a task, a forklift backing up, and the usual warnings gone: that's the moment SightLine is built for.
+
+This is far from rare. BC sees about 500 forklift injury claims a year, and in Alberta, 22% of workplace injury claims involve contact with objects or equipment.
+
+Traditional alarms have their own problem: they keep going off even when workers have already seen the moving machine. People get used to the noise and stop paying attention.
 
 ## Our solution
 
-SightLine checks for attention instead of assuming it. An overhead camera watches the worker and the machine, and a headband tracks which way the worker's head is pointing. The worker's phone, or later a wristband, buzzes only when both of these are true:
+The idea is simple: if you've already noticed the hazard, SightLine stays quiet. If you haven't, it gives you a buzz.
 
-- **the machine is approaching:** it's moving and heading toward the worker;
-- **the worker isn't facing it:** their head is turned more than 60° away from the machine.
+To tell whether you've seen it, SightLine looks at your head direction. An overhead camera watches the worker and the vehicle, and a headband tracks which way the worker's head is pointing. If your head pointed at the vehicle (within a 60° field of view) for at least 0.3 s in the last 3 s, that counts as seen. The worker's phone, or later a wristband, buzzes only when both of these are true:
+
+- **the vehicle is approaching:** it's moving and heading toward the worker;
+- **the worker hasn't seen it.**
 
 Fewer pointless alarms means workers keep trusting the ones that matter. Nothing is wired into the machines, and everything runs offline over a phone hotspot.
 
@@ -29,7 +35,7 @@ Fewer pointless alarms means workers keep trusting the ones that matter. Nothing
 3. **Find the worker and the machine:** a hardhat marker tags the worker and a marker on top tags the machine, with YOLO + ByteTrack and a dark-blob fallback.
 4. **Velocities:** a line fit over the last 0.5 s gives the machine's speed and direction.
 5. **Head direction:** the Muse S headband's gyro gives head yaw over Bluetooth.
-6. **Alert rule:** approaching (faster than 0.1 m/s, within 60° of the line to the worker) **and** not facing (head more than 60° off).
+6. **Alert rule:** approaching (faster than 0.1 m/s, within 60° of the line to the worker) **and** not facing (the vehicle is outside the worker's 60° field of view, 30° either side of their head direction). The current build checks this on every frame; the 0.3 s in 3 s memory is next.
 7. **Buzz:** the laptop calls the alert server, which pushes the alert to the Android app. The buzz stops by itself if the laptop goes silent for 1.5 s.
 
 ## Features
@@ -86,7 +92,7 @@ Open the printed `https://<laptop IP>:8443` link on the camera phone and tap **S
 
 - **Before the demo:** a fail-safe buzz when data goes stale; a time-to-contact gate; "looked recently" memory, so a quick glance counts; bigger markers and sharper video
 - **Next:** several machines at once; fixed hazard zones (pit edges, swing radius); a Kalman filter to keep tracking through gaps; camera-corrected heading; the ESP32 wristband
-- **Later:** detecting machines without markers; scoring hit and false-alarm rates; several workers; a pilot on an Alberta oilsands laydown yard
+- **Later:** detecting machines without markers; scoring hit and false-alarm rates; several workers; a pilot at a warehouse or industrial site
 
 ## Repo layout
 
@@ -97,7 +103,6 @@ Open the printed `https://<laptop IP>:8443` link on the camera phone and tap **S
 | `max/` | Muse head motion (yaw, drift, contact maths) and a live dashboard |
 | `phone-alert/` | Alert server and Android app |
 | `hanh/` | Floor-mapping check, hardhat heading tests and printable markers |
-
 
 ## Team
 
